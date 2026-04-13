@@ -1,0 +1,189 @@
+use crate::BitBoard;
+
+impl<const W: usize, const H: usize> BitBoard<W, H> {
+    /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算する
+    ///
+    /// 垂直方向と水平方向にそれぞれ (size - 1) 回のビットシフト AND を行うことで、
+    /// 矩形領域すべてが 1 である地点を抽出する。
+    pub fn compute_unit_passable(&self, width: u32, height: u32) -> Self {
+        let mut result = self.clone();
+
+        // 垂直方向の縮小: 下方向へ height - 1 タイル分 AND を繰り返す
+        for _ in 1..height {
+            for row in 0..H - 1 {
+                let s = row * Self::ROW_U64S;
+                let next_s = (row + 1) * Self::ROW_U64S;
+                for i in 0..Self::ROW_U64S {
+                    // 下の行と AND を取ることで「自分とその下が OK」という状態にする
+                    result.data[s + i] &= result.data[next_s + i];
+                }
+            }
+            // 最下行は下にタイルがないため、2タイル以上のユニットの起点にはなり得ない
+            let last_s = (H - 1) * Self::ROW_U64S;
+            for i in 0..Self::ROW_U64S {
+                result.data[last_s + i] = 0;
+            }
+        }
+
+        // 水平方向の縮小: 右方向へ width - 1 タイル分 AND を繰り返す
+        for _ in 1..width {
+            for row in 0..H {
+                let s = row * Self::ROW_U64S;
+                for i in 0..Self::ROW_U64S {
+                    // 右隣のビットを持ってくるためのキャリー計算
+                    let carry = if i + 1 < Self::ROW_U64S {
+                        result.data[s + i + 1] << 63
+                    } else {
+                        0
+                    };
+                    // 右方向 (x+1) と AND を取る
+                    // (x+1) はビット位置では一つ上位だが、idx 計算上は >> 1 で LSB 側に寄せる
+                    result.data[s + i] &= (result.data[s + i] >> 1) | carry;
+                }
+            }
+            // 各行の右端ビットは右にタイルがないため、同様に 0 になる（carry 0 によって自動処理される）
+        }
+
+        result
+    }
+
+    /// BFS ウェーブフロントを 1 ステップ展開する
+    ///
+    /// `self` を現在のフロンティアとして 4 方向（N/S/E/W）に展開し、
+    /// `passable` でマスクして `visited` 済みタイルを除いた次フロンティアを返す。
+    /// ループで呼び出すことで Flow field・Dijkstra map の BFS を実現できる。
+    pub fn expand(&self, passable: &Self, visited: &mut Self) -> Self {
+        let mut next = Self::default();
+
+        for row in 0..H {
+            let s = row * Self::ROW_U64S;
+
+            // 垂直方向：行インデックスの加減算のみ（ビットシフト不要）
+            if row > 0 {
+                for i in 0..Self::ROW_U64S {
+                    next.data[s + i] |= self.data[s - Self::ROW_U64S + i]; // North
+                }
+            }
+            if row < H - 1 {
+                for i in 0..Self::ROW_U64S {
+                    next.data[s + i] |= self.data[s + Self::ROW_U64S + i]; // South
+                }
+            }
+
+            // 水平方向：隣接 u64 へのキャリー伝播あり
+            for i in 0..Self::ROW_U64S {
+                // East（左シフト）
+                let carry_e = if i > 0 { self.data[s + i - 1] >> 63 } else { 0 };
+                next.data[s + i] |= (self.data[s + i] << 1) | carry_e;
+                // West（右シフト）
+                let carry_w = if i + 1 < Self::ROW_U64S {
+                    self.data[s + i + 1] << 63
+                } else {
+                    0
+                };
+                next.data[s + i] |= (self.data[s + i] >> 1) | carry_w;
+            }
+        }
+
+        // passable でマスクし、既訪問を除外して visited に追記
+        for i in 0..Self::TOTAL_WORDS {
+            next.data[i] &= passable.data[i] & !visited.data[i];
+            visited.data[i] |= next.data[i];
+        }
+
+        // East シフトで発生し得るパディングビットをクリア
+        next.clear_padding();
+
+        next
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::BitBoard;
+
+    #[test]
+    fn expand_basic() {
+        type Bb = BitBoard<16, 16>;
+        let mut passable = Bb::default();
+        for y in 0..5 {
+            for x in 0..5 {
+                passable.set(x, y, true);
+            }
+        }
+
+        let mut frontier = Bb::default();
+        frontier.set(2, 2, true);
+        let mut visited = frontier.clone();
+
+        // 1 ステップ展開: 4方向の隣接タイル
+        let next = frontier.expand(&passable, &mut visited);
+        assert!(next.get(1, 2)); // West
+        assert!(next.get(3, 2)); // East
+        assert!(next.get(2, 1)); // North
+        assert!(next.get(2, 3)); // South
+        assert!(!next.get(2, 2)); // 既訪問
+        assert_eq!(next.count_ones(), 4);
+    }
+
+    #[test]
+    fn expand_respects_walls() {
+        type Bb = BitBoard<8, 8>;
+        let mut passable = Bb::default();
+        // L字型の通路
+        passable.set(0, 0, true);
+        passable.set(1, 0, true);
+        passable.set(1, 1, true);
+
+        let mut frontier = Bb::default();
+        frontier.set(0, 0, true);
+        let mut visited = frontier.clone();
+
+        let next = frontier.expand(&passable, &mut visited);
+        assert!(next.get(1, 0)); // 通路方向に展開
+        assert!(!next.get(0, 1)); // 壁なので展開されない
+        assert_eq!(next.count_ones(), 1);
+    }
+
+    #[test]
+    fn expand_no_padding_leak() {
+        // W が 64 の倍数でないボードで expand がパディングビットを漏らさないことを確認
+        type Bb = BitBoard<100, 10>;
+        let mut passable = Bb::default();
+        for y in 0..10 {
+            for x in 0..100 {
+                passable.set(x, y, true);
+            }
+        }
+
+        let mut frontier = Bb::default();
+        frontier.set(99, 5, true); // 右端
+        let mut visited = frontier.clone();
+
+        let next = frontier.expand(&passable, &mut visited);
+        for &(x, _y) in &next.iter_set_bits().collect::<Vec<_>>() {
+            assert!(x < 100, "Padding bit leaked in expand: x={x}");
+        }
+    }
+
+    #[test]
+    fn compute_unit_passable_2x2() {
+        type Bb = BitBoard<8, 8>;
+        let mut passable = Bb::default();
+        for y in 0..4 {
+            for x in 0..4 {
+                passable.set(x, y, true);
+            }
+        }
+
+        let result = passable.compute_unit_passable(2, 2);
+
+        // 2×2 ユニットの左上が置ける位置
+        assert!(result.get(0, 0));
+        assert!(result.get(1, 1));
+        assert!(result.get(2, 2)); // 右下が (3,3) で通行可能範囲内
+        assert!(!result.get(3, 3)); // 右下が (4,4) で通行不可
+        assert!(!result.get(4, 0));
+        assert!(!result.get(0, 4));
+    }
+}
