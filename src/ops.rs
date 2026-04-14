@@ -8,7 +8,7 @@ impl<const W: usize, const H: usize> BitAnd for &BitBoard<W, H> {
         for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
             data.push(self.data[i] & rhs.data[i]);
         }
-        BitBoard { data }
+        BitBoard::<W, H> { data }
     }
 }
 
@@ -27,7 +27,7 @@ impl<const W: usize, const H: usize> BitOr for &BitBoard<W, H> {
         for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
             data.push(self.data[i] | rhs.data[i]);
         }
-        BitBoard { data }
+        BitBoard::<W, H> { data }
     }
 }
 
@@ -46,7 +46,7 @@ impl<const W: usize, const H: usize> BitXor for &BitBoard<W, H> {
         for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
             data.push(self.data[i] ^ rhs.data[i]);
         }
-        BitBoard { data }
+        BitBoard::<W, H> { data }
     }
 }
 
@@ -65,7 +65,7 @@ impl<const W: usize, const H: usize> Not for &BitBoard<W, H> {
         for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
             data.push(!self.data[i]);
         }
-        let mut result = BitBoard { data };
+        let mut result = BitBoard::<W, H> { data };
         result.clear_padding();
         result
     }
@@ -126,19 +126,19 @@ mod tests {
         b.set(30, 30, true);
 
         // AND: 共通部分のみ
-        let and_res = &a & &b;
+        let and_res: TestBoard = &a & &b;
         assert!(!and_res.get(10, 10));
         assert!(and_res.get(20, 20));
         assert!(!and_res.get(30, 30));
 
         // OR: 両方の和
-        let or_res = &a | &b;
+        let or_res: TestBoard = &a | &b;
         assert!(or_res.get(10, 10));
         assert!(or_res.get(20, 20));
         assert!(or_res.get(30, 30));
 
         // NOT: 反転
-        let not_a = !&a;
+        let not_a: TestBoard = !&a;
         assert!(!not_a.get(10, 10));
         assert!(not_a.get(0, 0));
     }

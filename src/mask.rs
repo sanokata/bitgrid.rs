@@ -161,7 +161,7 @@ mod tests {
         let mut data = TestBoard::default();
         data.set(65, 0, true);
         data.set(75, 0, true);
-        let result = &data & &mask;
+        let result: BitBoard<256, 256> = &data & &mask;
         assert!(result.get(65, 0)); // マスク内なので維持
         assert!(!result.get(75, 0)); // マスク外なので消える
     }

@@ -85,6 +85,42 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         self.data.iter().any(|&w| w != 0)
     }
 
+    /// 指定した行 `y` において、`min_x` から `max_x` までの範囲に1つでもビットが設定されているか
+    ///
+    /// マスク演算を用いて u64 単位で一括判定を行うため、ループよりはるかに高速。
+    pub fn any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
+        if y < 0 || y >= H as i32 || min_x >= W as i32 || max_x < 0 || min_x > max_x {
+            return false;
+        }
+        
+        let min_x = min_x.max(0) as usize;
+        let max_x = max_x.min((W as i32) - 1) as usize;
+
+        let start_word = (y as usize) * Self::ROW_U64S + min_x / 64;
+        let end_word = (y as usize) * Self::ROW_U64S + max_x / 64;
+
+        if start_word == end_word {
+            // 同じ u64 ワード内に収まる場合
+            let len = max_x - min_x + 1;
+            let mask = if len == 64 { !0u64 } else { ((1u64 << len) - 1) << (min_x % 64) };
+            (self.data[start_word] & mask) != 0
+        } else {
+            // 開始ワード
+            let mask_start = !0u64 << (min_x % 64);
+            if (self.data[start_word] & mask_start) != 0 { return true; }
+            
+            // 中間ワード（丸ごと判定）
+            for w in (start_word + 1)..end_word {
+                if self.data[w] != 0 { return true; }
+            }
+
+            // 終了ワード
+            let len_end = (max_x % 64) + 1;
+            let mask_end = if len_end == 64 { !0u64 } else { (1u64 << len_end) - 1 };
+            (self.data[end_word] & mask_end) != 0
+        }
+    }
+
     /// 立っているビットの総数を返す
     pub fn count_ones(&self) -> u32 {
         self.data.iter().map(|w| w.count_ones()).sum()
@@ -110,6 +146,8 @@ impl<const W: usize, const H: usize> Default for BitBoard<W, H> {
         Self::new()
     }
 }
+
+// Traits removed as they exist in ops.rs
 
 #[cfg(test)]
 mod tests {
