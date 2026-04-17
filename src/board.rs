@@ -4,6 +4,8 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BitBoard<const W: usize, const H: usize> {
     pub(crate) data: Vec<u64>,
+    /// 階層化マスク (Level 1): 各ビットは data[i] が 0 でないかを表す
+    pub(crate) l1_mask: Vec<u64>,
 }
 
 impl<const W: usize, const H: usize> BitBoard<W, H> {
@@ -12,6 +14,9 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
     /// data 内部配列の総要素数
     pub const TOTAL_WORDS: usize = Self::ROW_U64S * H;
+
+    /// l1_mask 内部配列の要素数 (1ビットで1ワードをカバー)
+    pub const L1_WORDS: usize = (Self::TOTAL_WORDS + 63) / 64;
 
     /// ボード幅（タイル数）
     pub const WIDTH: usize = W;
@@ -30,7 +35,13 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     pub fn new() -> Self {
         Self {
             data: vec![0u64; Self::TOTAL_WORDS],
+            l1_mask: vec![0u64; Self::L1_WORDS],
         }
+    }
+
+    /// 内部的な初期化用
+    pub(crate) fn new_with_mask(data: Vec<u64>, l1_mask: Vec<u64>) -> Self {
+        Self { data, l1_mask }
     }
 
     /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
@@ -48,10 +59,20 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         if let Some((word, bit)) = Self::idx(x, y) {
             if value {
                 self.data[word] |= 1u64 << bit;
+                self.l1_mask[word / 64] |= 1u64 << (word % 64);
             } else {
                 self.data[word] &= !(1u64 << bit);
+                if self.data[word] == 0 {
+                    self.l1_mask[word / 64] &= !(1u64 << (word % 64));
+                }
             }
         }
+    }
+
+    /// 指定インデックスのワードが非空であることを L1 マスクに反映
+    #[inline]
+    pub(crate) fn mark_word_non_empty(&mut self, word_idx: usize) {
+        self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
     }
 
     /// 指定座標のビットを取得
@@ -62,6 +83,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// ビットマップ全体を 0 でクリア
     pub fn clear(&mut self) {
         self.data.iter_mut().for_each(|v| *v = 0);
+        self.l1_mask.iter_mut().for_each(|v| *v = 0);
     }
 
     /// いずれかのビットが立っているか判定
@@ -111,6 +133,37 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             for row in 0..H {
                 let last = row * Self::ROW_U64S + Self::ROW_U64S - 1;
                 self.data[last] &= Self::PADDING_MASK;
+            }
+        }
+    }
+
+    /// 別のボードとの積集合（AND）が 1 であるビットを高速に走査
+    /// 階層化マスクを利用して、両方のボードが空でない領域のみを訪問する
+    pub fn for_each_intersection<F>(&self, other: &Self, mut callback: F)
+    where
+        F: FnMut(i32, i32),
+    {
+        for l1_idx in 0..Self::L1_WORDS {
+            let mut combined_l1 = self.l1_mask[l1_idx] & other.l1_mask[l1_idx];
+            if combined_l1 == 0 { continue; }
+
+            let start_word = l1_idx * 64;
+            while combined_l1 != 0 {
+                let bit_in_l1 = combined_l1.trailing_zeros();
+                combined_l1 &= combined_l1 - 1;
+
+                let word_idx = start_word + bit_in_l1 as usize;
+                if word_idx >= Self::TOTAL_WORDS { break; }
+
+                let mut combined_data = self.data[word_idx] & other.data[word_idx];
+                while combined_data != 0 {
+                    let bit = combined_data.trailing_zeros();
+                    combined_data &= combined_data - 1;
+
+                    let y = (word_idx / Self::ROW_U64S) as i32;
+                    let x = ((word_idx % Self::ROW_U64S) * 64 + bit as usize) as i32;
+                    callback(x, y);
+                }
             }
         }
     }

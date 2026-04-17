@@ -17,11 +17,28 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
                 if self.word_idx >= BitBoard::<W, H>::TOTAL_WORDS {
                     return None;
                 }
-                self.current_word = self.bitmap.data[self.word_idx];
+
+                // L1層（階層化マスク）を用いた高速スキップ
+                let l1_word_idx = self.word_idx / 64;
+                let bit_in_l1 = self.word_idx % 64;
+                let l1_segment = self.bitmap.l1_mask[l1_word_idx] >> bit_in_l1;
+
+                if l1_segment == 0 {
+                    // この L1 ワードに含まれる残りの 64 ワードはすべて空。次の L1 境界までジャンプ
+                    self.word_idx = (l1_word_idx + 1) * 64 - 1; // loop冒頭で+1されるため-1
+                    continue;
+                } else {
+                    // 次にビットが立っているワードを特定
+                    let skip = l1_segment.trailing_zeros() as usize;
+                    self.word_idx += skip;
+                    self.current_word = self.bitmap.data[self.word_idx];
+                }
             }
 
             let bit = self.current_word.trailing_zeros();
+            // 立っているビットを1つ降ろす (n & (n-1))
             self.current_word &= self.current_word - 1;
+            
             let y = (self.word_idx / BitBoard::<W, H>::ROW_U64S) as i32;
             let x = ((self.word_idx % BitBoard::<W, H>::ROW_U64S) * 64 + bit as usize) as i32;
             return Some((x, y));

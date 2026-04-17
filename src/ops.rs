@@ -5,7 +5,8 @@ impl<const W: usize, const H: usize> BitAnd for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitand(self, rhs: Self) -> Self::Output {
         let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a & b).collect();
-        BitBoard::<W, H> { data }
+        let l1_mask = self.l1_mask.iter().zip(rhs.l1_mask.iter()).map(|(a, b)| a & b).collect();
+        BitBoard::<W, H>::new_with_mask(data, l1_mask)
     }
 }
 
@@ -14,6 +15,9 @@ impl<const W: usize, const H: usize> BitAndAssign<&BitBoard<W, H>> for BitBoard<
         for i in 0..Self::TOTAL_WORDS {
             self.data[i] &= rhs.data[i];
         }
+        for i in 0..Self::L1_WORDS {
+            self.l1_mask[i] &= rhs.l1_mask[i];
+        }
     }
 }
 
@@ -21,7 +25,8 @@ impl<const W: usize, const H: usize> BitOr for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitor(self, rhs: Self) -> Self::Output {
         let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a | b).collect();
-        BitBoard::<W, H> { data }
+        let l1_mask = self.l1_mask.iter().zip(rhs.l1_mask.iter()).map(|(a, b)| a | b).collect();
+        BitBoard::<W, H>::new_with_mask(data, l1_mask)
     }
 }
 
@@ -30,6 +35,9 @@ impl<const W: usize, const H: usize> BitOrAssign<&BitBoard<W, H>> for BitBoard<W
         for i in 0..Self::TOTAL_WORDS {
             self.data[i] |= rhs.data[i];
         }
+        for i in 0..Self::L1_WORDS {
+            self.l1_mask[i] |= rhs.l1_mask[i];
+        }
     }
 }
 
@@ -37,7 +45,8 @@ impl<const W: usize, const H: usize> BitXor for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitxor(self, rhs: Self) -> Self::Output {
         let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a ^ b).collect();
-        BitBoard::<W, H> { data }
+        let l1_mask = self.l1_mask.iter().zip(rhs.l1_mask.iter()).map(|(a, b)| a | b).collect();
+        BitBoard::<W, H>::new_with_mask(data, l1_mask)
     }
 }
 
@@ -46,6 +55,9 @@ impl<const W: usize, const H: usize> BitXorAssign<&BitBoard<W, H>> for BitBoard<
         for i in 0..Self::TOTAL_WORDS {
             self.data[i] ^= rhs.data[i];
         }
+        for i in 0..Self::L1_WORDS {
+            self.l1_mask[i] |= rhs.l1_mask[i];
+        }
     }
 }
 
@@ -53,7 +65,8 @@ impl<const W: usize, const H: usize> Not for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn not(self) -> Self::Output {
         let data = self.data.iter().map(|a| !a).collect();
-        let mut result = BitBoard::<W, H> { data };
+        let l1_mask = vec![!0u64; BitBoard::<W, H>::L1_WORDS]; // 安全側に倒して全ビットを立てる
+        let mut result = BitBoard::<W, H>::new_with_mask(data, l1_mask);
         result.clear_padding();
         result
     }
@@ -64,6 +77,9 @@ impl<const W: usize, const H: usize> Not for BitBoard<W, H> {
     fn not(mut self) -> Self::Output {
         for i in 0..Self::TOTAL_WORDS {
             self.data[i] = !self.data[i];
+        }
+        for i in 0..Self::L1_WORDS {
+            self.l1_mask[i] = !0u64;
         }
         self.clear_padding();
         self

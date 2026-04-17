@@ -23,13 +23,23 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         for row in y1..y2 {
             let row_offset = row * Self::ROW_U64S;
             if start_word == end_word {
-                mask.data[row_offset + start_word] = start_mask & end_mask;
+                let idx = row_offset + start_word;
+                mask.data[idx] = start_mask & end_mask;
+                if mask.data[idx] != 0 { mask.mark_word_non_empty(idx); }
             } else {
-                mask.data[row_offset + start_word] = start_mask;
+                let idx_s = row_offset + start_word;
+                mask.data[idx_s] = start_mask;
+                if mask.data[idx_s] != 0 { mask.mark_word_non_empty(idx_s); }
+                
                 for w in (start_word + 1)..end_word {
-                    mask.data[row_offset + w] = !0u64;
+                    let idx = row_offset + w;
+                    mask.data[idx] = !0u64;
+                    mask.mark_word_non_empty(idx);
                 }
-                mask.data[row_offset + end_word] = end_mask;
+                
+                let idx_e = row_offset + end_word;
+                mask.data[idx_e] = end_mask;
+                if mask.data[idx_e] != 0 { mask.mark_word_non_empty(idx_e); }
             }
         }
         mask
@@ -117,15 +127,26 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let mut mask = Self::default();
         mask.set(cx, cy, true); // 立っている位置は必ず見える
 
-        for octant in 0..8 {
-            self.cast_light(&mut mask, cx, cy, radius, 1, 1.0, 0.0, octant, opaque_board);
+        // 8つのオクタントに対して走査を行う
+        // 方向ベクトル組: (xx, xy, yx, yy)
+        let directions = [
+            (1, 0, 0, -1),  (0, 1, -1, 0),  (0, 1, 1, 0),   (-1, 0, 0, 1),
+            (-1, 0, 0, -1), (0, -1, -1, 0), (0, -1, 1, 0),  (1, 0, 0, 1)
+        ];
+
+        for (xx, xy, yx, yy) in directions {
+            self.scan_octant(
+                &mut mask, cx, cy, radius, 1, 1.0, 0.0, 
+                xx, xy, yx, yy, 
+                opaque_board
+            );
         }
 
         mask
     }
 
-    /// 再帰的シャドウキャスティングのコアロジック
-    fn cast_light(
+    /// 再帰的シャドウキャスティングの走査コアロジック
+    fn scan_octant(
         &self,
         mask: &mut BitBoard<W, H>,
         cx: i32,
@@ -134,7 +155,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         row: i32,
         mut start_slope: f32,
         end_slope: f32,
-        octant: i32,
+        xx: i32, xy: i32, yx: i32, yy: i32,
         opaque_board: &BitBoard<W, H>,
     ) {
         if start_slope < end_slope {
@@ -146,25 +167,17 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
         for distance in row..=(radius.ceil() as i32) {
             let mut next_start_slope = start_slope;
+            let mut row_fully_blocked = true;
 
             for i in 0..=distance {
-                // オクタントに応じた座標変換
-                let (dx, dy) = match octant {
-                    0 => (distance, -i),
-                    1 => (i, -distance),
-                    2 => (-i, -distance),
-                    3 => (-distance, -i),
-                    4 => (-distance, i),
-                    5 => (-i, distance),
-                    6 => (i, distance),
-                    7 => (distance, i),
-                    _ => (0, 0),
-                };
-
+                // 事前に計算されたベクトルによる高速な座標変換
+                let dx = distance * xx + i * xy;
+                let dy = distance * yx + i * yy;
                 let x = cx + dx;
                 let y = cy + dy;
 
-                if dx as f32 * dx as f32 + dy as f32 * dy as f32 > radius_sq {
+                // マップ範囲外チェック（高速化のためここで行う）
+                if x < 0 || x >= W as i32 || y < 0 || y >= H as i32 {
                     continue;
                 }
 
@@ -178,34 +191,29 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                     break;
                 }
 
-                // 見える範囲内ならセット
-                mask.set(x, y, true);
+                // 距離チェック
+                if (dx * dx + dy * dy) as f32 <= radius_sq {
+                    mask.set(x, y, true);
+                    row_fully_blocked = false;
+                }
 
                 let is_opaque = opaque_board.get(x, y);
 
                 if last_was_opaque == 1 && !is_opaque {
-                    // 不透明から透明に変わった場合、新しい開始スロープを設定
                     next_start_slope = l_slope;
                 } else if last_was_opaque == 0 && is_opaque {
-                    // 透明から不透明に変わった場合、現在のスロープで再帰
-                    self.cast_light(
-                        mask,
-                        cx,
-                        cy,
-                        radius,
-                        distance + 1,
-                        start_slope,
-                        r_slope,
-                        octant,
-                        opaque_board,
+                    self.scan_octant(
+                        mask, cx, cy, radius, distance + 1, 
+                        start_slope, r_slope, 
+                        xx, xy, yx, yy, 
+                        opaque_board
                     );
                 }
 
                 last_was_opaque = if is_opaque { 1 } else { 0 };
             }
 
-            if last_was_opaque == 1 {
-                // 行の終わりが不透明だった場合、その先の視界は遮られる
+            if last_was_opaque == 1 || row_fully_blocked {
                 break;
             }
             start_slope = next_start_slope;
@@ -226,13 +234,23 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
         let row_offset = row * Self::ROW_U64S;
         if start_word == end_word {
-            self.data[row_offset + start_word] |= start_mask & end_mask;
+            let idx = row_offset + start_word;
+            self.data[idx] |= start_mask & end_mask;
+            self.mark_word_non_empty(idx);
         } else {
-            self.data[row_offset + start_word] |= start_mask;
+            let idx_s = row_offset + start_word;
+            self.data[idx_s] |= start_mask;
+            self.mark_word_non_empty(idx_s);
+            
             for w in (start_word + 1)..end_word {
-                self.data[row_offset + w] |= !0u64;
+                let idx = row_offset + w;
+                self.data[idx] |= !0u64;
+                self.mark_word_non_empty(idx);
             }
-            self.data[row_offset + end_word] |= end_mask;
+            
+            let idx_e = row_offset + end_word;
+            self.data[idx_e] |= end_mask;
+            self.mark_word_non_empty(idx_e);
         }
     }
 }
