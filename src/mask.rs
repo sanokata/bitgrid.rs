@@ -35,8 +35,6 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         mask
     }
 
-    /// 扇形（扇状）のビットマスクを生成
-    /// 中心座標、半径、開始角度、掃引角度を指定。360度以上で円形。
     pub fn sector_mask(
         cx: i32,
         cy: i32,
@@ -105,6 +103,113 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             }
         }
         mask
+    }
+
+    /// 遮蔽物（opaque_board）を考慮した視界マスクを生成
+    /// 再帰的シャドウキャスティング（Recursive Shadowcasting）を用いて計算
+    pub fn compute_visibility_mask(
+        &self,
+        cx: i32,
+        cy: i32,
+        radius: f32,
+        opaque_board: &BitBoard<W, H>,
+    ) -> Self {
+        let mut mask = Self::default();
+        mask.set(cx, cy, true); // 立っている位置は必ず見える
+
+        for octant in 0..8 {
+            self.cast_light(&mut mask, cx, cy, radius, 1, 1.0, 0.0, octant, opaque_board);
+        }
+
+        mask
+    }
+
+    /// 再帰的シャドウキャスティングのコアロジック
+    fn cast_light(
+        &self,
+        mask: &mut BitBoard<W, H>,
+        cx: i32,
+        cy: i32,
+        radius: f32,
+        row: i32,
+        mut start_slope: f32,
+        end_slope: f32,
+        octant: i32,
+        opaque_board: &BitBoard<W, H>,
+    ) {
+        if start_slope < end_slope {
+            return;
+        }
+
+        let radius_sq = radius * radius;
+        let mut last_was_opaque = -1; // -1: 初期, 0: 透明, 1: 不透明
+
+        for distance in row..=(radius.ceil() as i32) {
+            let mut next_start_slope = start_slope;
+
+            for i in 0..=distance {
+                // オクタントに応じた座標変換
+                let (dx, dy) = match octant {
+                    0 => (distance, -i),
+                    1 => (i, -distance),
+                    2 => (-i, -distance),
+                    3 => (-distance, -i),
+                    4 => (-distance, i),
+                    5 => (-i, distance),
+                    6 => (i, distance),
+                    7 => (distance, i),
+                    _ => (0, 0),
+                };
+
+                let x = cx + dx;
+                let y = cy + dy;
+
+                if dx as f32 * dx as f32 + dy as f32 * dy as f32 > radius_sq {
+                    continue;
+                }
+
+                let l_slope = (i as f32 + 0.5) / (distance as f32 - 0.5);
+                let r_slope = (i as f32 - 0.5) / (distance as f32 + 0.5);
+
+                if start_slope < r_slope {
+                    continue;
+                }
+                if end_slope > l_slope {
+                    break;
+                }
+
+                // 見える範囲内ならセット
+                mask.set(x, y, true);
+
+                let is_opaque = opaque_board.get(x, y);
+
+                if last_was_opaque == 1 && !is_opaque {
+                    // 不透明から透明に変わった場合、新しい開始スロープを設定
+                    next_start_slope = l_slope;
+                } else if last_was_opaque == 0 && is_opaque {
+                    // 透明から不透明に変わった場合、現在のスロープで再帰
+                    self.cast_light(
+                        mask,
+                        cx,
+                        cy,
+                        radius,
+                        distance + 1,
+                        start_slope,
+                        r_slope,
+                        octant,
+                        opaque_board,
+                    );
+                }
+
+                last_was_opaque = if is_opaque { 1 } else { 0 };
+            }
+
+            if last_was_opaque == 1 {
+                // 行の終わりが不透明だった場合、その先の視界は遮られる
+                break;
+            }
+            start_slope = next_start_slope;
+        }
     }
 
     /// 行内の指定範囲 [x1, x2) のビットを立てる (内部用)
