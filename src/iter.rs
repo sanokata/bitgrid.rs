@@ -12,21 +12,19 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.current_word != 0 {
-                let bit = self.current_word.trailing_zeros();
-                // 見つけたビットをリセット
-                self.current_word &= self.current_word - 1;
-
-                let y = (self.word_idx / BitBoard::<W, H>::ROW_U64S) as i32;
-                let x = ((self.word_idx % BitBoard::<W, H>::ROW_U64S) * 64 + bit as usize) as i32;
-                return Some((x, y));
+            while self.current_word == 0 {
+                self.word_idx += 1;
+                if self.word_idx >= BitBoard::<W, H>::TOTAL_WORDS {
+                    return None;
+                }
+                self.current_word = self.bitmap.data[self.word_idx];
             }
 
-            self.word_idx += 1;
-            if self.word_idx >= BitBoard::<W, H>::TOTAL_WORDS {
-                return None;
-            }
-            self.current_word = self.bitmap.data[self.word_idx];
+            let bit = self.current_word.trailing_zeros();
+            self.current_word &= self.current_word - 1;
+            let y = (self.word_idx / BitBoard::<W, H>::ROW_U64S) as i32;
+            let x = ((self.word_idx % BitBoard::<W, H>::ROW_U64S) * 64 + bit as usize) as i32;
+            return Some((x, y));
         }
     }
 }

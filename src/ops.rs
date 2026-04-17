@@ -4,10 +4,7 @@ use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, N
 impl<const W: usize, const H: usize> BitAnd for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitand(self, rhs: Self) -> Self::Output {
-        let mut data = Vec::with_capacity(BitBoard::<W, H>::TOTAL_WORDS);
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            data.push(self.data[i] & rhs.data[i]);
-        }
+        let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a & b).collect();
         BitBoard::<W, H> { data }
     }
 }
@@ -23,10 +20,7 @@ impl<const W: usize, const H: usize> BitAndAssign<&BitBoard<W, H>> for BitBoard<
 impl<const W: usize, const H: usize> BitOr for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitor(self, rhs: Self) -> Self::Output {
-        let mut data = Vec::with_capacity(BitBoard::<W, H>::TOTAL_WORDS);
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            data.push(self.data[i] | rhs.data[i]);
-        }
+        let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a | b).collect();
         BitBoard::<W, H> { data }
     }
 }
@@ -42,10 +36,7 @@ impl<const W: usize, const H: usize> BitOrAssign<&BitBoard<W, H>> for BitBoard<W
 impl<const W: usize, const H: usize> BitXor for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn bitxor(self, rhs: Self) -> Self::Output {
-        let mut data = Vec::with_capacity(BitBoard::<W, H>::TOTAL_WORDS);
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            data.push(self.data[i] ^ rhs.data[i]);
-        }
+        let data = self.data.iter().zip(rhs.data.iter()).map(|(a, b)| a ^ b).collect();
         BitBoard::<W, H> { data }
     }
 }
@@ -61,10 +52,7 @@ impl<const W: usize, const H: usize> BitXorAssign<&BitBoard<W, H>> for BitBoard<
 impl<const W: usize, const H: usize> Not for &BitBoard<W, H> {
     type Output = BitBoard<W, H>;
     fn not(self) -> Self::Output {
-        let mut data = Vec::with_capacity(BitBoard::<W, H>::TOTAL_WORDS);
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            data.push(!self.data[i]);
-        }
+        let data = self.data.iter().map(|a| !a).collect();
         let mut result = BitBoard::<W, H> { data };
         result.clear_padding();
         result

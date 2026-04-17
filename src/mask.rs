@@ -230,7 +230,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         } else {
             self.data[row_offset + start_word] |= start_mask;
             for w in (start_word + 1)..end_word {
-                self.data[row_offset + w] = !0u64;
+                self.data[row_offset + w] |= !0u64;
             }
             self.data[row_offset + end_word] |= end_mask;
         }
