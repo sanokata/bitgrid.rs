@@ -1,6 +1,6 @@
 use crate::BitBoard;
 
-/// BitBoard のビットが立っている座標を巡回するイテレータ
+/// ビットが立っている座標を巡回するイテレータ
 pub struct BitBoardIter<'a, const W: usize, const H: usize> {
     bitmap: &'a BitBoard<W, H>,
     word_idx: usize,
@@ -14,7 +14,7 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
         loop {
             if self.current_word != 0 {
                 let bit = self.current_word.trailing_zeros();
-                // 見つけたビットを下ろす（word &= word - 1 の最適化）
+                // 見つけたビットをリセット
                 self.current_word &= self.current_word - 1;
 
                 let y = (self.word_idx / BitBoard::<W, H>::ROW_U64S) as i32;
@@ -32,7 +32,7 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
 }
 
 impl<const W: usize, const H: usize> BitBoard<W, H> {
-    /// ビットが立っている座標 `(x, y)` を列挙するイテレータを返す
+    /// 立っているビットの座標 (x, y) を列挙するイテレータを取得
     pub fn iter_set_bits(&self) -> BitBoardIter<'_, W, H> {
         BitBoardIter {
             bitmap: self,

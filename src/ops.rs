@@ -82,7 +82,7 @@ impl<const W: usize, const H: usize> Not for BitBoard<W, H> {
     }
 }
 
-// ─────────────── owned value operators ───────────────────────────────
+// ─────────────── 所有権/参照ベースのビット演算子実装 ───────────────────────────────
 
 impl<const W: usize, const H: usize> BitAnd for BitBoard<W, H> {
     type Output = Self;

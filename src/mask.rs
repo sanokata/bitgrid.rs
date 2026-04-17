@@ -1,9 +1,8 @@
 use crate::BitBoard;
 
 impl<const W: usize, const H: usize> BitBoard<W, H> {
-    /// 指定した矩形範囲（タイル座標）のみを 1 にしたマスク用ビットマップを生成する。
-    ///
-    /// これにより `&bitmap & &mask` のような演算で、特定範囲の情報を高速に抽出・制限できる。
+    /// 指定した矩形範囲のみを 1 にしたマスクを作成
+    /// 範囲情報の高速な抽出・制限に使用
     pub fn rectangle_mask(x: i32, y: i32, width: i32, height: i32) -> Self {
         let mut mask = Self::default();
 
@@ -36,12 +35,8 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         mask
     }
 
-    /// 扇形（扇状）のビットマスクを生成する。
-    ///
-    /// - `cx`, `cy`: 中心座標（タイル単位）
-    /// - `radius`: 半径（タイル単位）
-    /// - `start_angle_deg`: 開始角度（度数法、右方向が 0 度、時計回り）
-    /// - `sweep_angle_deg`: 扇形の広さ（度数法）。360 度以上で円形となる。
+    /// 扇形（扇状）のビットマスクを生成
+    /// 中心座標、半径、開始角度、掃引角度を指定。360度以上で円形。
     pub fn sector_mask(
         cx: i32,
         cy: i32,
@@ -80,7 +75,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             }
 
             if is_circle {
-                // 円形の場合はワード単位で高速に埋める
+                // 円形の場合は行範囲を一括設定
                 mask.set_row_range(y as usize, x_min as usize, (x_max + 1) as usize);
             } else {
                 let start_vec_x = start_rad.cos();
@@ -93,7 +88,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 for x in x_min..=x_max {
                     let dx = x as f32 - cx as f32;
 
-                    // 外積 (v1.x * v2.y - v1.y * v2.x) による向き判定
+                    // 外積を用いた角度範囲の判定
                     let cross_start = start_vec_x * dy - start_vec_y * dx;
                     let cross_end = end_vec_x * dy - end_vec_y * dx;
 

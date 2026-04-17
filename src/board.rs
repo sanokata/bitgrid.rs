@@ -1,50 +1,39 @@
 /// 行アライメントされたビットマップデータ構造
-///
-/// 型パラメータ `W` と `H` でボードのタイル幅・高さをコンパイル時に固定する。
-/// 各行は [`ROW_U64S`](Self::ROW_U64S) 個の u64 で構成される。`W` が 64 の倍数のとき
-/// 垂直方向のビット演算が単純な配列インデックス操作になる。
-///
-/// 座標計算: `(x, y)` → `(data[y * ROW_U64S + x / 64], x % 64)`
+/// 型パラメータ W と H でボードサイズを型レベルで固定
+/// 内部的には u64 配列で保持し、高速なビット演算をサポート
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BitBoard<const W: usize, const H: usize> {
     pub(crate) data: Vec<u64>,
 }
 
 impl<const W: usize, const H: usize> BitBoard<W, H> {
-    /// 1行あたりの u64 ワード数（自動計算）
+    /// 1行あたりの u64 ワード数
     pub const ROW_U64S: usize = (W + 63) / 64;
 
-    /// data 配列の総要素数（u64 の個数）
+    /// data 内部配列の総要素数
     pub const TOTAL_WORDS: usize = Self::ROW_U64S * H;
 
-    /// ボードの幅（タイル数）
+    /// ボード幅（タイル数）
     pub const WIDTH: usize = W;
 
-    /// ボードの高さ（タイル数）
+    /// ボード高さ（タイル数）
     pub const HEIGHT: usize = H;
 
-    /// 各行の最後のワードに適用するパディングマスク。
-    /// `W` が 64 の倍数の場合は全ビット有効 (`!0`)、
-    /// そうでない場合は下位 `W % 64` ビットのみ有効。
+    /// 行末パディング用のマスク
     pub(crate) const PADDING_MASK: u64 = if W % 64 == 0 {
         !0u64
     } else {
         (1u64 << (W % 64)) - 1
     };
 
-    /// 全ビット 0 で初期化された新しいビットボードを生成する
+    /// 全ビット 0 のボードを生成
     pub fn new() -> Self {
         Self {
             data: vec![0u64; Self::TOTAL_WORDS],
         }
     }
 
-    /// タイル座標 `(x, y)` を `(word, bit)` に変換する
-    ///
-    /// - `word` : `data` のインデックス（`y * ROW_U64S + x / 64`）
-    /// - `bit`  : その word 内のビット位置（`x % 64`）
-    ///
-    /// マップ境界外の場合は `None` を返す。
+    /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
     pub(crate) fn idx(x: i32, y: i32) -> Option<(usize, u32)> {
         if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
             return None;
@@ -54,10 +43,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         Some((word, bit))
     }
 
-    /// タイル座標 `(x, y)` のビットを設定する
-    ///
-    /// `value = true` でビットを立て、`false` で落とす。
-    /// マップ境界外の座標は無視される。
+    /// 指定座標のビットを設定
     pub fn set(&mut self, x: i32, y: i32, value: bool) {
         if let Some((word, bit)) = Self::idx(x, y) {
             if value {
@@ -68,26 +54,23 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
     }
 
-    /// タイル座標 `(x, y)` のビットを返す
-    ///
-    /// マップ境界外の座標は `false` を返す。
+    /// 指定座標のビットを取得
     pub fn get(&self, x: i32, y: i32) -> bool {
         Self::idx(x, y).map_or(false, |(word, bit)| (self.data[word] >> bit) & 1 != 0)
     }
 
-    /// ビットマップ全体をクリアする
+    /// ビットマップ全体を 0 でクリア
     pub fn clear(&mut self) {
         self.data.iter_mut().for_each(|v| *v = 0);
     }
 
-    /// ビットが 1 つでも立っているかを確認する（空判定の高速化）
+    /// いずれかのビットが立っているか判定
     pub fn any_bits_set(&self) -> bool {
         self.data.iter().any(|&w| w != 0)
     }
 
-    /// 指定した行 `y` において、`min_x` から `max_x` までの範囲に1つでもビットが設定されているか
-    ///
-    /// マスク演算を用いて u64 単位で一括判定を行うため、ループよりはるかに高速。
+    /// 指定した行の特定範囲内にビットが立っているか判定
+    /// マスク演算による高速一括判定を実行
     pub fn any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
         if y < 0 || y >= H as i32 || min_x >= W as i32 || max_x < 0 || min_x > max_x {
             return false;
@@ -100,37 +83,29 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let end_word = (y as usize) * Self::ROW_U64S + max_x / 64;
 
         if start_word == end_word {
-            // 同じ u64 ワード内に収まる場合
             let len = max_x - min_x + 1;
             let mask = if len == 64 { !0u64 } else { ((1u64 << len) - 1) << (min_x % 64) };
             (self.data[start_word] & mask) != 0
         } else {
-            // 開始ワード
             let mask_start = !0u64 << (min_x % 64);
             if (self.data[start_word] & mask_start) != 0 { return true; }
             
-            // 中間ワード（丸ごと判定）
             for w in (start_word + 1)..end_word {
                 if self.data[w] != 0 { return true; }
             }
 
-            // 終了ワード
             let len_end = (max_x % 64) + 1;
             let mask_end = if len_end == 64 { !0u64 } else { (1u64 << len_end) - 1 };
             (self.data[end_word] & mask_end) != 0
         }
     }
 
-    /// 立っているビットの総数を返す
+    /// 1（オン）状態のビット総数を取得
     pub fn count_ones(&self) -> u32 {
         self.data.iter().map(|w| w.count_ones()).sum()
     }
 
-    /// 各行末尾のパディングビットをクリアする。
-    ///
-    /// `W` が 64 の倍数でない場合、各行の最後の u64 ワードには
-    /// ボード範囲外の余剰ビットが存在する。`Not` や `expand` など
-    /// パディング領域にゴミビットが発生し得る演算の後に呼び出す。
+    /// 行ごとの余剰ビット（パディング領域）を 0 クリア
     pub(crate) fn clear_padding(&mut self) {
         if Self::PADDING_MASK != !0u64 {
             for row in 0..H {

@@ -1,76 +1,69 @@
 use crate::BitBoard;
 
 impl<const W: usize, const H: usize> BitBoard<W, H> {
-    /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算する
-    ///
-    /// 垂直方向と水平方向にそれぞれ (size - 1) 回のビットシフト AND を行うことで、
-    /// 矩形領域すべてが 1 である地点を抽出する。
+    /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算
+    /// 垂直・水平方向に (size - 1) 回のビットシフト AND を行い、全タイルの空きを確認
     pub fn compute_unit_passable(&self, width: u32, height: u32) -> Self {
         let mut result = self.clone();
 
-        // 垂直方向の縮小: 下方向へ height - 1 タイル分 AND を繰り返す
+        // 垂直方向の縮小: 下方向へ AND を繰り返す
         for _ in 1..height {
             for row in 0..H - 1 {
                 let s = row * Self::ROW_U64S;
                 let next_s = (row + 1) * Self::ROW_U64S;
                 for i in 0..Self::ROW_U64S {
-                    // 下の行と AND を取ることで「自分とその下が OK」という状態にする
+                    // 下の行と論理積を取り「自マスとその下が通行可能」な状態を伝播
                     result.data[s + i] &= result.data[next_s + i];
                 }
             }
-            // 最下行は下にタイルがないため、2タイル以上のユニットの起点にはなり得ない
+            // 最下行はユニットの起点になり得ないため 0 クリア
             let last_s = (H - 1) * Self::ROW_U64S;
             for i in 0..Self::ROW_U64S {
                 result.data[last_s + i] = 0;
             }
         }
 
-        // 水平方向の縮小: 右方向へ width - 1 タイル分 AND を繰り返す
+        // 水平方向の縮小: 右方向へ AND を繰り返す
         for _ in 1..width {
             for row in 0..H {
                 let s = row * Self::ROW_U64S;
                 for i in 0..Self::ROW_U64S {
-                    // 右隣のビットを持ってくるためのキャリー計算
+                    // 右隣ワードからのキャリーを取得
                     let carry = if i + 1 < Self::ROW_U64S {
                         result.data[s + i + 1] << 63
                     } else {
                         0
                     };
-                    // 右方向 (x+1) と AND を取る
-                    // (x+1) はビット位置では一つ上位だが、idx 計算上は >> 1 で LSB 側に寄せる
+                    // 右方向 (x+1) と論理積を取る
                     result.data[s + i] &= (result.data[s + i] >> 1) | carry;
                 }
             }
-            // 各行の右端ビットは右にタイルがないため、同様に 0 になる（carry 0 によって自動処理される）
         }
 
         result
     }
 
-    /// BFS ウェーブフロントを 1 ステップ展開する
-    ///
-    /// `self` を現在のフロンティアとして 4 方向（N/S/E/W）に展開し、
-    /// `passable` でマスクして `visited` 済みタイルを除いた次フロンティアを返す。
-    /// ループで呼び出すことで Flow field・Dijkstra map の BFS を実現できる。
+    /// BFS ウェーブフロントを 1 ステップ展開
+    /// 現在のフロンティアを 4 方向（上下左右）に広げ、マスク処理と既訪問除外を実行
     pub fn expand(&self, passable: &Self, visited: &mut Self) -> Self {
         let mut next = Self::default();
 
         for row in 0..H {
             let s = row * Self::ROW_U64S;
 
-            // 垂直方向：行インデックスの加減算のみ（ビットシフト不要）
+            // 垂直方向（北・南）の展開
             if row > 0 {
                 for i in 0..Self::ROW_U64S {
-                    next.data[s + i] |= self.data[s - Self::ROW_U64S + i]; // North
+                    next.data[s + i] |= self.data[s - Self::ROW_U64S + i];
                 }
             }
             if row < H - 1 {
                 for i in 0..Self::ROW_U64S {
-                    next.data[s + i] |= self.data[s + Self::ROW_U64S + i]; // South
+                    next.data[s + i] |= self.data[s + Self::ROW_U64S + i];
                 }
             }
 
-            // 水平方向：隣接 u64 へのキャリー伝播あり
+            // 水平方向（東・西）の展開。ワード跨ぎのキャリー伝播を含む
             for i in 0..Self::ROW_U64S {
                 // East（左シフト）
                 let carry_e = if i > 0 { self.data[s + i - 1] >> 63 } else { 0 };
@@ -85,13 +78,13 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             }
         }
 
-        // passable でマスクし、既訪問を除外して visited に追記
+        // 通行可能マスク適用、既訪問除外、および訪問済みリストへの追記
         for i in 0..Self::TOTAL_WORDS {
             next.data[i] &= passable.data[i] & !visited.data[i];
             visited.data[i] |= next.data[i];
         }
 
-        // East シフトで発生し得るパディングビットをクリア
+        // 行末パディングビットのクリーンアップ
         next.clear_padding();
 
         next
