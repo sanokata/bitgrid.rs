@@ -31,7 +31,8 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
                     // 次にビットが立っているワードを特定
                     let skip = l1_segment.trailing_zeros() as usize;
                     self.word_idx += skip;
-                    self.current_word = self.bitmap.data[self.word_idx];
+                    
+                    self.current_word = self.bitmap.get_masked_word(self.word_idx);
                 }
             }
 
@@ -41,7 +42,12 @@ impl<'a, const W: usize, const H: usize> Iterator for BitBoardIter<'a, W, H> {
             
             let y = (self.word_idx / BitBoard::<W, H>::ROW_U64S) as i32;
             let x = ((self.word_idx % BitBoard::<W, H>::ROW_U64S) * 64 + bit as usize) as i32;
-            return Some((x, y));
+            
+            // パディングマスクにより基本的にはパスするが、安全のため境界チェックを行う
+            if x < W as i32 {
+                return Some((x, y));
+            }
+            // パディングビットだった場合は loop により次のビットを探す
         }
     }
 }

@@ -84,7 +84,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
             if is_circle {
                 // 円形の場合は行範囲を一括設定
-                mask.set_row_range(y as usize, x_min as usize, (x_max + 1) as usize);
+                mask.set_row_range(y, x_min, x_max, true);
             } else {
                 let start_vec_x = start_rad.cos();
                 let start_vec_y = start_rad.sin();
@@ -217,40 +217,6 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 break;
             }
             start_slope = next_start_slope;
-        }
-    }
-
-    /// 行内の指定範囲 [x1, x2) のビットを立てる (内部用)
-    pub(crate) fn set_row_range(&mut self, row: usize, x1: usize, x2: usize) {
-        if x1 >= x2 || x1 >= W || row >= H {
-            return;
-        }
-        let x2 = x2.min(W);
-
-        let start_word = x1 / 64;
-        let end_word = (x2 - 1) / 64;
-        let start_mask = !0u64 << (x1 % 64);
-        let end_mask = !0u64 >> (63 - ((x2 - 1) % 64));
-
-        let row_offset = row * Self::ROW_U64S;
-        if start_word == end_word {
-            let idx = row_offset + start_word;
-            self.data[idx] |= start_mask & end_mask;
-            self.mark_word_non_empty(idx);
-        } else {
-            let idx_s = row_offset + start_word;
-            self.data[idx_s] |= start_mask;
-            self.mark_word_non_empty(idx_s);
-            
-            for w in (start_word + 1)..end_word {
-                let idx = row_offset + w;
-                self.data[idx] |= !0u64;
-                self.mark_word_non_empty(idx);
-            }
-            
-            let idx_e = row_offset + end_word;
-            self.data[idx_e] |= end_mask;
-            self.mark_word_non_empty(idx_e);
         }
     }
 }

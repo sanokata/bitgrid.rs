@@ -39,6 +39,54 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
     }
 
+    /// ボードの状態を整え、整合性を保証する（パディングのクリアとL1再構築）
+    pub fn finalize(&mut self) {
+        self.clear_padding();
+        self.rebuild_l1();
+    }
+
+    /// 内部データの全走査により L1 マスクを再構築
+    pub fn rebuild_l1(&mut self) {
+        self.l1_mask.fill(0);
+        for i in 0..Self::TOTAL_WORDS {
+            if self.data[i] != 0 {
+                self.l1_mask[i / 64] |= 1u64 << (i % 64);
+            }
+        }
+    }
+
+    /// 内部データ (data) への読み取り専用アクセス
+    pub(crate) fn data(&self) -> &[u64] {
+        &self.data
+    }
+
+    /// L1 層マスクへの読み取り専用アクセス
+    pub(crate) fn l1_mask(&self) -> &[u64] {
+        &self.l1_mask
+    }
+
+    /// ワールド座標からタイル座標への公式な変換 (床関数を使用)
+    #[inline(always)]
+    pub fn pos_to_tile(x: f32, y: f32) -> (i32, i32) {
+        (x.floor() as i32, y.floor() as i32)
+    }
+
+    /// タイル座標からフラットな空間インデックス (y * W + x) への変換
+    #[inline(always)]
+    pub fn tile_to_index(x: i32, y: i32) -> Option<usize> {
+        if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
+            None
+        } else {
+            Some(y as usize * W + x as usize)
+        }
+    }
+
+    /// フラットインデックスからタイル座標への変換
+    #[inline(always)]
+    pub fn index_to_tile(idx: usize) -> (i32, i32) {
+        ((idx % W) as i32, (idx / W) as i32)
+    }
+
     /// 内部的な初期化用
     pub(crate) fn new_with_mask(data: Vec<u64>, l1_mask: Vec<u64>) -> Self {
         Self { data, l1_mask }
@@ -80,10 +128,105 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         Self::idx(x, y).map_or(false, |(word, bit)| (self.data[word] >> bit) & 1 != 0)
     }
 
+    /// フラットインデックス形式でビットを取得
+    pub fn get_at_index(&self, idx: usize) -> bool {
+        let (x, y) = Self::index_to_tile(idx);
+        self.get(x, y)
+    }
+
     /// ビットマップ全体を 0 でクリア
     pub fn clear(&mut self) {
-        self.data.iter_mut().for_each(|v| *v = 0);
-        self.l1_mask.iter_mut().for_each(|v| *v = 0);
+        self.data.fill(0);
+        self.l1_mask.fill(0);
+    }
+
+    /// 矩形範囲を一括で塗りつぶす (最適化版)
+    pub fn fill_rect(&mut self, x: i32, y: i32, width: i32, height: i32, value: bool) {
+        if width <= 0 || height <= 0 { return; }
+        
+        let min_y = y.max(0);
+        let max_y = (y + height - 1).min((H as i32) - 1);
+        let min_x = x.max(0);
+        let max_x = (x + width - 1).min((W as i32) - 1);
+
+        if min_y > max_y || min_x > max_x { return; }
+
+        for current_y in min_y..=max_y {
+            self.set_row_range(current_y, min_x, max_x, value);
+        }
+    }
+
+    /// 指定した行の範囲に一括で値を設定 (内部ワード最適化)
+    pub fn set_row_range(&mut self, y: i32, min_x: i32, max_x: i32, value: bool) {
+        if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x < 0 {
+            return;
+        }
+
+        let min_x = min_x.max(0) as usize;
+        let max_x = max_x.min((W as i32) - 1) as usize;
+        let start_word = (y as usize) * Self::ROW_U64S + min_x / 64;
+        let end_word = (y as usize) * Self::ROW_U64S + max_x / 64;
+
+        if start_word == end_word {
+            let mask = Self::make_mask(min_x % 64, max_x % 64);
+            if value {
+                self.data[start_word] |= mask;
+                self.mark_word_non_empty(start_word);
+            } else {
+                self.data[start_word] &= !mask;
+                if self.data[start_word] == 0 {
+                    self.recalc_l1_word(start_word);
+                }
+            }
+        } else {
+            // 開始ワード
+            let start_mask = !0u64 << (min_x % 64);
+            if value {
+                self.data[start_word] |= start_mask;
+                self.mark_word_non_empty(start_word);
+            } else {
+                self.data[start_word] &= !start_mask;
+                if self.data[start_word] == 0 { self.recalc_l1_word(start_word); }
+            }
+
+            // 中間ワード
+            for w in (start_word + 1)..end_word {
+                if value {
+                    self.data[w] = !0u64;
+                    self.mark_word_non_empty(w);
+                } else {
+                    self.data[w] = 0;
+                    self.l1_mask[w / 64] &= !(1u64 << (w % 64));
+                }
+            }
+
+            // 終了ワード
+            let end_bits = (max_x % 64) + 1;
+            let end_mask = if end_bits == 64 { !0u64 } else { (1u64 << end_bits) - 1 };
+            if value {
+                self.data[end_word] |= end_mask;
+                self.mark_word_non_empty(end_word);
+            } else {
+                self.data[end_word] &= !end_mask;
+                if self.data[end_word] == 0 { self.recalc_l1_word(end_word); }
+            }
+        }
+    }
+
+    /// 特定ビット範囲のマスクを生成
+    #[inline]
+    fn make_mask(start_bit: usize, end_bit: usize) -> u64 {
+        let len = end_bit - start_bit + 1;
+        if len == 64 { !0u64 } else { ((1u64 << len) - 1) << start_bit }
+    }
+
+    /// 指定インデックスのワードの状態に基づいて L1 マスクを再計算（低速パス）
+    fn recalc_l1_word(&mut self, word_idx: usize) {
+        if self.data[word_idx] == 0 {
+            self.l1_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
+        } else {
+            self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
+        }
     }
 
     /// いずれかのビットが立っているか判定
@@ -97,7 +240,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         if y < 0 || y >= H as i32 || min_x >= W as i32 || max_x < 0 || min_x > max_x {
             return false;
         }
-        
+
         let min_x = min_x.max(0) as usize;
         let max_x = max_x.min((W as i32) - 1) as usize;
 
@@ -106,18 +249,30 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
         if start_word == end_word {
             let len = max_x - min_x + 1;
-            let mask = if len == 64 { !0u64 } else { ((1u64 << len) - 1) << (min_x % 64) };
+            let mask = if len == 64 {
+                !0u64
+            } else {
+                ((1u64 << len) - 1) << (min_x % 64)
+            };
             (self.data[start_word] & mask) != 0
         } else {
             let mask_start = !0u64 << (min_x % 64);
-            if (self.data[start_word] & mask_start) != 0 { return true; }
-            
+            if (self.data[start_word] & mask_start) != 0 {
+                return true;
+            }
+
             for w in (start_word + 1)..end_word {
-                if self.data[w] != 0 { return true; }
+                if self.data[w] != 0 {
+                    return true;
+                }
             }
 
             let len_end = (max_x % 64) + 1;
-            let mask_end = if len_end == 64 { !0u64 } else { (1u64 << len_end) - 1 };
+            let mask_end = if len_end == 64 {
+                !0u64
+            } else {
+                (1u64 << len_end) - 1
+            };
             (self.data[end_word] & mask_end) != 0
         }
     }
@@ -137,32 +292,87 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
     }
 
+    /// 指定インデックスのワードを、行末パディングを考慮して取得
+    #[inline(always)]
+    pub(crate) fn get_masked_word(&self, word_idx: usize) -> u64 {
+        let word = self.data[word_idx];
+        if (word_idx % Self::ROW_U64S) == Self::ROW_U64S - 1 {
+            word & Self::PADDING_MASK
+        } else {
+            word
+        }
+    }
+
+    /// 全てのオン（1）ビットを階層化マスクを利用して高速に走査
+    pub fn for_each_set_bit<F>(&self, mut callback: F)
+    where
+        F: FnMut(i32, i32, usize),
+    {
+        for l1_idx in 0..Self::L1_WORDS {
+            let mut l1_word = self.l1_mask[l1_idx];
+            if l1_word == 0 { continue; }
+
+            let start_word_idx = l1_idx * 64;
+            while l1_word != 0 {
+                let bit_in_l1 = l1_word.trailing_zeros();
+                l1_word &= l1_word - 1;
+
+                let word_idx = start_word_idx + bit_in_l1 as usize;
+                if word_idx >= Self::TOTAL_WORDS { break; }
+
+                let mut word_data = self.get_masked_word(word_idx);
+                if word_data == 0 { continue; }
+
+                let y = (word_idx / Self::ROW_U64S) as i32;
+                let x_base = (word_idx % Self::ROW_U64S) * 64;
+                let y_base_idx = y as usize * W;
+
+                while word_data != 0 {
+                    let bit = word_data.trailing_zeros();
+                    word_data &= word_data - 1;
+
+                    let x = x_base as i32 + bit as i32;
+                    if x < W as i32 {
+                        callback(x, y, y_base_idx + x as usize);
+                    }
+                }
+            }
+        }
+    }
+
     /// 別のボードとの積集合（AND）が 1 であるビットを高速に走査
-    /// 階層化マスクを利用して、両方のボードが空でない領域のみを訪問する
     pub fn for_each_intersection<F>(&self, other: &Self, mut callback: F)
     where
-        F: FnMut(i32, i32),
+        F: FnMut(i32, i32, usize),
     {
         for l1_idx in 0..Self::L1_WORDS {
             let mut combined_l1 = self.l1_mask[l1_idx] & other.l1_mask[l1_idx];
             if combined_l1 == 0 { continue; }
 
-            let start_word = l1_idx * 64;
+            let start_word_idx = l1_idx * 64;
             while combined_l1 != 0 {
                 let bit_in_l1 = combined_l1.trailing_zeros();
                 combined_l1 &= combined_l1 - 1;
 
-                let word_idx = start_word + bit_in_l1 as usize;
+                let word_idx = start_word_idx + bit_in_l1 as usize;
                 if word_idx >= Self::TOTAL_WORDS { break; }
 
-                let mut combined_data = self.data[word_idx] & other.data[word_idx];
+                let mut combined_data = self.get_masked_word(word_idx) & other.get_masked_word(word_idx);
+                if combined_data == 0 { continue; }
+
+                let y = (word_idx / Self::ROW_U64S) as i32;
+                let x_base = (word_idx % Self::ROW_U64S) * 64;
+                let y_base_idx = y as usize * W;
+
                 while combined_data != 0 {
                     let bit = combined_data.trailing_zeros();
                     combined_data &= combined_data - 1;
 
-                    let y = (word_idx / Self::ROW_U64S) as i32;
-                    let x = ((word_idx % Self::ROW_U64S) * 64 + bit as usize) as i32;
-                    callback(x, y);
+                    let x = x_base as i32 + bit as i32;
+                    if x < W as i32 {
+                        let idx = y_base_idx + x as usize;
+                        callback(x, y, idx);
+                    }
                 }
             }
         }
@@ -266,5 +476,30 @@ mod tests {
         bb.set(100, 100, true);
         bb.set(255, 255, true);
         assert_eq!(bb.count_ones(), 3);
+    }
+
+    #[test]
+    fn test_padding_leak() {
+        type SmallBoard = BitBoard<10, 2>; // 10x2, ROW_U64S=1, 54 bits padding per row
+        let mut bb = SmallBoard::default();
+        bb = !bb; // 全ビット反転。パディング領域が適切に処理されていれば、有効な 20 ビットだけが立つはず
+
+        // イテレータのテスト
+        let mut count = 0;
+        for (x, y) in bb.iter_set_bits() {
+            assert!(x >= 0 && x < 10, "Invalid x: {}", x);
+            assert!(y >= 0 && y < 2, "Invalid y: {}", y);
+            count += 1;
+        }
+        assert_eq!(count, 20, "Should only visit 20 bits");
+
+        // 積集合走査のテスト
+        let mut intersect_count = 0;
+        bb.for_each_intersection(&bb, |x, y, _idx| {
+            assert!(x >= 0 && x < 10, "Invalid x in intersection: {}", x);
+            assert!(y >= 0 && y < 2, "Invalid y in intersection: {}", y);
+            intersect_count += 1;
+        });
+        assert_eq!(intersect_count, 20, "Should only visit 20 bits in intersection");
     }
 }
