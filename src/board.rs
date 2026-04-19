@@ -340,7 +340,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
     }
 
-    /// 別のボードとの積集合（AND）が 1 であるビットを高速に走査
+    /// 別のボードとの積集合（AND）が 1 であるビットを指定範囲内のみ高速に走査
     pub fn for_each_intersection<F>(&self, other: &Self, mut callback: F)
     where
         F: FnMut(i32, i32, usize),
@@ -372,6 +372,53 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                     if x < W as i32 {
                         let idx = y_base_idx + x as usize;
                         callback(x, y, idx);
+                    }
+                }
+            }
+        }
+    }
+
+    /// 指定したタイル範囲内でのみ、別のボードとの積集合（AND）を高速走査
+    pub fn for_each_intersection_in_range<F>(
+        &self, 
+        other: &Self, 
+        min_tile: (i32, i32), 
+        max_tile: (i32, i32), 
+        mut callback: F
+    )
+    where
+        F: FnMut(i32, i32, usize),
+    {
+        let min_y = min_tile.1.max(0).min(H as i32 - 1) as usize;
+        let max_y = max_tile.1.max(0).min(H as i32 - 1) as usize;
+        let min_word_x = (min_tile.0.max(0) as usize) / 64;
+        let max_word_x = (max_tile.0.min(W as i32 - 1) as usize) / 64;
+
+        for y in min_y..=max_y {
+            let row_offset = y * Self::ROW_U64S;
+            let y_base_idx = y * W;
+            
+            for word_x in min_word_x..=max_word_x {
+                let word_idx = row_offset + word_x;
+                
+                // L1チェック (個別のワードに対してなので劇的な高速化ではないが、メモリアクセスのガードになる)
+                let l1_word_idx = word_idx / 64;
+                let bit_in_l1 = word_idx % 64;
+                if (self.l1_mask[l1_word_idx] & other.l1_mask[l1_word_idx] & (1u64 << bit_in_l1)) == 0 {
+                    continue;
+                }
+
+                let mut combined_data = self.get_masked_word(word_idx) & other.get_masked_word(word_idx);
+                if combined_data == 0 { continue; }
+
+                let x_base = word_x * 64;
+                while combined_data != 0 {
+                    let bit = combined_data.trailing_zeros();
+                    combined_data &= combined_data - 1;
+
+                    let x = x_base as i32 + bit as i32;
+                    if x < W as i32 {
+                        callback(x, y as i32, y_base_idx + x as usize);
                     }
                 }
             }
@@ -501,5 +548,31 @@ mod tests {
             intersect_count += 1;
         });
         assert_eq!(intersect_count, 20, "Should only visit 20 bits in intersection");
+    }
+
+    #[test]
+    fn test_for_each_intersection_in_range() {
+        let mut bb1 = TestBoard::default();
+        let mut bb2 = TestBoard::default();
+        
+        // 範囲内
+        bb1.set(100, 100, true);
+        bb2.set(100, 100, true);
+        
+        // 範囲外 (xが遠い)
+        bb1.set(200, 100, true);
+        bb2.set(200, 100, true);
+        
+        // 範囲外 (yが遠い)
+        bb1.set(100, 200, true);
+        bb2.set(100, 200, true);
+
+        let mut hits = Vec::new();
+        bb1.for_each_intersection_in_range(&bb2, (90, 90), (110, 110), |x, y, _| {
+            hits.push((x, y));
+        });
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0], (100, 100));
     }
 }
