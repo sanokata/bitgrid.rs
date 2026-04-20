@@ -47,6 +47,16 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// 現在のフロンティアを 4 方向（上下左右）に広げ、マスク処理と既訪問除外を実行
     pub fn expand(&self, passable: &Self, visited: &mut Self) -> Self {
         let mut next = Self::default();
+        self.expand_into(passable, visited, &mut next);
+        next
+    }
+
+    /// `expand` のアロケーションフリー版。
+    /// 結果は事前に確保された `out` バッファに書き込まれる。
+    /// `out` は呼び出し前にクリアされている必要はない（内部でゼロ初期化される）。
+    pub fn expand_into(&self, passable: &Self, visited: &mut Self, out: &mut Self) {
+        // 出力バッファをクリア
+        for w in out.data.iter_mut() { *w = 0; }
 
         for row in 0..H {
             let s = row * Self::ROW_U64S;
@@ -54,12 +64,12 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             // 垂直方向（北・南）の展開
             if row > 0 {
                 for i in 0..Self::ROW_U64S {
-                    next.data[s + i] |= self.data[s - Self::ROW_U64S + i];
+                    out.data[s + i] |= self.data[s - Self::ROW_U64S + i];
                 }
             }
             if row < H - 1 {
                 for i in 0..Self::ROW_U64S {
-                    next.data[s + i] |= self.data[s + Self::ROW_U64S + i];
+                    out.data[s + i] |= self.data[s + Self::ROW_U64S + i];
                 }
             }
 
@@ -67,28 +77,28 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             for i in 0..Self::ROW_U64S {
                 // East（左シフト）
                 let carry_e = if i > 0 { self.data[s + i - 1] >> 63 } else { 0 };
-                next.data[s + i] |= (self.data[s + i] << 1) | carry_e;
+                out.data[s + i] |= (self.data[s + i] << 1) | carry_e;
                 // West（右シフト）
                 let carry_w = if i + 1 < Self::ROW_U64S {
                     self.data[s + i + 1] << 63
                 } else {
                     0
                 };
-                next.data[s + i] |= (self.data[s + i] >> 1) | carry_w;
+                out.data[s + i] |= (self.data[s + i] >> 1) | carry_w;
             }
         }
 
         // 通行可能マスク適用、既訪問除外、および訪問済みリストへの追記
         for i in 0..Self::TOTAL_WORDS {
-            next.data[i] &= passable.data[i] & !visited.data[i];
-            visited.data[i] |= next.data[i];
+            out.data[i] &= passable.data[i] & !visited.data[i];
+            visited.data[i] |= out.data[i];
         }
 
         // 行末パディングビットのクリーンアップ
-        next.clear_padding();
-
-        next
+        out.clear_padding();
+        out.rebuild_l1();
     }
+
 }
 
 #[cfg(test)]
