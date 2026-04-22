@@ -63,37 +63,6 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         self.apply_word_mask(ew, e_mask, value);
     }
 
-    /// 特定ビット範囲のマスクを生成
-    #[inline]
-    pub(crate) fn make_mask(start_bit: usize, end_bit: usize) -> u64 {
-        let len = end_bit - start_bit + 1;
-        if len == 64 {
-            !0u64
-        } else {
-            ((1u64 << len) - 1) << start_bit
-        }
-    }
-
-    /// 特定のワードに対してマスクを適用し、L1 マスクを同期する
-    #[inline(always)]
-    pub(crate) fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
-        if value {
-            self.data[word_idx] |= mask;
-            self.mark_word_non_empty(word_idx);
-        } else {
-            self.data[word_idx] &= !mask;
-            self.recalc_l1_word(word_idx);
-        }
-    }
-
-    /// 指定インデックスのワードの状態に基づいて L1 マスクを再計算（低速パス）
-    pub(crate) fn recalc_l1_word(&mut self, word_idx: usize) {
-        if self.data[word_idx] == 0 {
-            self.l1_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
-        } else {
-            self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
-        }
-    }
 }
 
 #[cfg(test)]

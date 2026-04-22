@@ -185,6 +185,38 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
     }
 
+    /// 特定ビット範囲のマスクを生成
+    #[inline]
+    pub(crate) fn make_mask(start_bit: usize, end_bit: usize) -> u64 {
+        let len = end_bit - start_bit + 1;
+        if len == 64 {
+            !0u64
+        } else {
+            ((1u64 << len) - 1) << start_bit
+        }
+    }
+
+    /// 特定のワードに対してマスクを適用し、L1 マスクを同期する
+    #[inline(always)]
+    pub(crate) fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
+        if value {
+            self.data[word_idx] |= mask;
+            self.mark_word_non_empty(word_idx);
+        } else {
+            self.data[word_idx] &= !mask;
+            self.recalc_l1_word(word_idx);
+        }
+    }
+
+    /// 指定インデックスのワードの状態に基づいて L1 マスクを再計算（低速パス）
+    pub(crate) fn recalc_l1_word(&mut self, word_idx: usize) {
+        if self.data[word_idx] == 0 {
+            self.l1_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
+        } else {
+            self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
+        }
+    }
+
     /// 内部データの全走査により L1 マスクを再構築
     pub fn rebuild_l1(&mut self) {
         self.l1_mask.fill(0);
@@ -214,6 +246,105 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let word = y as usize * Self::ROW_U64S + x as usize / 64;
         let bit = (x as usize % 64) as u32;
         Some((word, bit))
+    }
+
+    /// 水平方向に指定距離シフトした新しいボードを返す (内部用)
+    pub(crate) fn shifted_h(&self, dist: i32) -> Self {
+        let mut res = Self::new();
+        if dist == 0 {
+            return self.clone();
+        }
+        let abs_dist = dist.abs() as usize;
+        if abs_dist >= W {
+            return res;
+        }
+
+        let word_dist = abs_dist / 64;
+        let bit_dist = (abs_dist % 64) as u32;
+
+        // L1マスクを活用して、64ワード（L1の1ビット分）単位で空の領域をスキップ
+        for l1_idx in 0..Self::L1_WORDS {
+            if self.l1_mask[l1_idx] == 0 {
+                continue;
+            }
+
+            let start_idx = l1_idx * 64;
+            let end_idx = (start_idx + 64).min(Self::TOTAL_WORDS);
+
+            for i in start_idx..end_idx {
+                let row = i / Self::ROW_U64S;
+                let _s = row * Self::ROW_U64S;
+                let col_word = i % Self::ROW_U64S;
+
+                if dist > 0 {
+                    // 西から東へ (左シフト)
+                    if col_word >= word_dist {
+                        let w = self.data[i - word_dist];
+                        let carry = if bit_dist > 0 && col_word > word_dist {
+                            self.data[i - word_dist - 1] >> (64 - bit_dist)
+                        } else {
+                            0
+                        };
+                        res.data[i] = (w << bit_dist) | carry;
+                    }
+                } else {
+                    // 東から西へ (右シフト)
+                    if col_word + word_dist < Self::ROW_U64S {
+                        let w = self.data[i + word_dist];
+                        let carry = if bit_dist > 0 && col_word + word_dist + 1 < Self::ROW_U64S {
+                            self.data[i + word_dist + 1] << (64 - bit_dist)
+                        } else {
+                            0
+                        };
+                        res.data[i] = (w >> bit_dist) | carry;
+                    }
+                }
+            }
+        }
+        res.finalize();
+        res
+    }
+
+    /// 垂直方向に指定距離シフトした新しいボードを返す (内部用)
+    pub(crate) fn shifted_v(&self, dist: i32) -> Self {
+        let mut res = Self::new();
+        if dist == 0 {
+            return self.clone();
+        }
+        let abs_dist = dist.abs() as usize;
+        if abs_dist >= H {
+            return res;
+        }
+
+        let word_offset = abs_dist * Self::ROW_U64S;
+
+        // 垂直シフトも L1 マスクでスキップ（ソース領域が空ならコピー不要）
+        for l1_idx in 0..Self::L1_WORDS {
+            if self.l1_mask[l1_idx] == 0 {
+                continue;
+            }
+
+            let start_idx = l1_idx * 64;
+            let end_idx = (start_idx + 64).min(Self::TOTAL_WORDS);
+
+            if dist > 0 {
+                // 下へ (y+)
+                for i in start_idx..end_idx {
+                    if i + word_offset < Self::TOTAL_WORDS {
+                        res.data[i + word_offset] = self.data[i];
+                    }
+                }
+            } else {
+                // 上へ (y-)
+                for i in start_idx..end_idx {
+                    if i >= word_offset {
+                        res.data[i - word_offset] = self.data[i];
+                    }
+                }
+            }
+        }
+        res.finalize();
+        res
     }
 
 
