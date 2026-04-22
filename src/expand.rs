@@ -4,7 +4,11 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算
     /// 垂直・水平方向に (size - 1) 回のビットシフト AND を行い、全タイルの空きを確認
     pub fn compute_unit_passable(&self, width: u32, height: u32) -> Self {
-        let mut result = self.clone();
+        let mut result = Self::new();
+        // self のデータを result にコピー
+        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
+            result.data[i] = self.data[i];
+        }
 
         // 垂直方向の縮小: 下方向へ AND を繰り返す
         for _ in 1..height {
@@ -40,6 +44,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             }
         }
 
+        result.finalize(); // 最後にL1マスクを再構築し、パディングをクリア
         result
     }
 
@@ -56,7 +61,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// `out` は呼び出し前にクリアされている必要はない（内部でゼロ初期化される）。
     pub fn expand_into(&self, passable: &Self, visited: &mut Self, out: &mut Self) {
         // 出力バッファをクリア
-        for w in out.data.iter_mut() { *w = 0; }
+        out.clear(); // 既存のclearメソッドを使用
 
         for row in 0..H {
             let s = row * Self::ROW_U64S;
@@ -89,7 +94,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
 
         // 通行可能マスク適用、既訪問除外、および訪問済みリストへの追記
-        for i in 0..Self::TOTAL_WORDS {
+        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
             out.data[i] &= passable.data[i] & !visited.data[i];
             visited.data[i] |= out.data[i];
         }
@@ -98,7 +103,6 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         out.clear_padding();
         out.rebuild_l1();
     }
-
 }
 
 #[cfg(test)]
