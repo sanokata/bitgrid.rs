@@ -16,9 +16,11 @@
 //! ```
 
 mod board;
+mod bulk;
 mod expand;
 mod iter;
 mod mask;
+mod morphology;
 mod ops;
 
 pub use board::BitBoard;
