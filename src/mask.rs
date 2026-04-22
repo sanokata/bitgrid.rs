@@ -20,28 +20,36 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let start_mask = !0u64 << (x1 % 64);
         let end_mask = !0u64 >> (63 - ((x2 - 1) % 64));
 
-        for row in y1..y2 {
-            let row_offset = row * Self::ROW_U64S;
-            if start_word == end_word {
-                let idx = row_offset + start_word;
-                mask.data[idx] = start_mask & end_mask;
-                if mask.data[idx] != 0 { mask.mark_word_non_empty(idx); }
-            } else {
-                let idx_s = row_offset + start_word;
-                mask.data[idx_s] = start_mask;
-                if mask.data[idx_s] != 0 { mask.mark_word_non_empty(idx_s); }
-                
-                for w in (start_word + 1)..end_word {
-                    let idx = row_offset + w;
-                    mask.data[idx] = !0u64;
-                    mask.mark_word_non_empty(idx);
-                }
-                
-                let idx_e = row_offset + end_word;
-                mask.data[idx_e] = end_mask;
-                if mask.data[idx_e] != 0 { mask.mark_word_non_empty(idx_e); }
+        // 1. 最初の行 (y1) のパターンを作成
+        let first_row_offset = y1 * Self::ROW_U64S;
+        if start_word == end_word {
+            mask.data[first_row_offset + start_word] = start_mask & end_mask;
+        } else {
+            mask.data[first_row_offset + start_word] = start_mask;
+            if end_word > start_word + 1 {
+                mask.data[first_row_offset + start_word + 1..first_row_offset + end_word]
+                    .fill(!0u64);
+            }
+            mask.data[first_row_offset + end_word] = end_mask;
+        }
+
+        // 2. 最初の行を他の行に高速コピー (memmove)
+        if y2 > y1 + 1 {
+            let row_range = first_row_offset..first_row_offset + Self::ROW_U64S;
+            for row in y1 + 1..y2 {
+                let dest_offset = row * Self::ROW_U64S;
+                mask.data.copy_within(row_range.clone(), dest_offset);
             }
         }
+
+        // 3. L1 マスクを一括更新
+        for row in y1..y2 {
+            let row_base = row * Self::ROW_U64S;
+            for w in start_word..=end_word {
+                mask.mark_word_non_empty(row_base + w);
+            }
+        }
+
         mask
     }
 
@@ -52,67 +60,128 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         start_angle_deg: f32,
         sweep_angle_deg: f32,
     ) -> Self {
-        let mut mask = Self::default();
+        let mut mask = Self::new();
         if radius <= 0.0 {
             return mask;
         }
 
+        let sweep_abs = sweep_angle_deg.abs();
+        let is_circle = sweep_abs >= 360.0;
+        let is_convex = sweep_abs <= 180.0;
+
+        let start_rad = start_angle_deg.to_radians();
+        let sweep_rad = sweep_angle_deg.to_radians();
+        let end_rad = start_rad + sweep_rad;
+
+        let (s_vy, s_vx) = start_rad.sin_cos();
+        let (e_vy, e_vx) = end_rad.sin_cos();
+
+        let cx_f = cx as f32;
+        let cy_f = cy as f32;
+        let r_sq = radius * radius;
         let r_i = radius.ceil() as i32;
+
         let y_min = (cy - r_i).max(0);
         let y_max = (cy + r_i).min(H as i32 - 1);
 
-        let is_circle = sweep_angle_deg >= 360.0;
-        let start_rad = start_angle_deg.to_radians();
-        let sweep_rad = sweep_angle_deg.to_radians();
-
         for y in y_min..=y_max {
-            let dy = y as f32 - cy as f32;
-            let dx_limit_sq = radius * radius - dy * dy;
+            let dy = y as f32 - cy_f;
+            let dx_limit_sq = r_sq - dy * dy;
             if dx_limit_sq < 0.0 {
                 continue;
             }
             let dx_limit = dx_limit_sq.sqrt();
-
-            let x_start = (cx as f32 - dx_limit).ceil() as i32;
-            let x_end = (cx as f32 + dx_limit).floor() as i32;
-            let x_min = x_start.max(0);
-            let x_max = x_end.min(W as i32 - 1);
-
-            if x_min > x_max {
-                continue;
-            }
+            let x_c_min = -dx_limit;
+            let x_c_max = dx_limit;
 
             if is_circle {
-                // 円形の場合は行範囲を一括設定
-                mask.set_row_range(y, x_min, x_max, true);
+                mask.set_row_range(
+                    y,
+                    (cx_f + x_c_min).ceil() as i32,
+                    (cx_f + x_c_max).floor() as i32,
+                    true,
+                );
+            } else if is_convex {
+                let (f_min, f_max) =
+                    Self::calc_convex_range(dy, x_c_min, x_c_max, s_vx, s_vy, e_vx, e_vy);
+                if f_min <= f_max {
+                    mask.set_row_range(
+                        y,
+                        (cx_f + f_min).ceil() as i32,
+                        (cx_f + f_max).floor() as i32,
+                        true,
+                    );
+                }
             } else {
-                let start_vec_x = start_rad.cos();
-                let start_vec_y = start_rad.sin();
-                let end_rad = start_rad + sweep_rad;
-                let end_vec_x = end_rad.cos();
-                let end_vec_y = end_rad.sin();
-                let is_convex = sweep_rad <= std::f32::consts::PI;
-
-                for x in x_min..=x_max {
-                    let dx = x as f32 - cx as f32;
-
-                    // 外積を用いた角度範囲の判定
-                    let cross_start = start_vec_x * dy - start_vec_y * dx;
-                    let cross_end = end_vec_x * dy - end_vec_y * dx;
-
-                    let in_sector = if is_convex {
-                        cross_start >= -1e-6 && cross_end <= 1e-6
-                    } else {
-                        cross_start >= -1e-6 || cross_end <= 1e-6
-                    };
-
-                    if in_sector {
-                        mask.set(x, y, true);
-                    }
+                // 凹型: 円を塗ってから「隙間（逆側の凸セクター）」を消去
+                mask.set_row_range(
+                    y,
+                    (cx_f + x_c_min).ceil() as i32,
+                    (cx_f + x_c_max).floor() as i32,
+                    true,
+                );
+                let (g_min, g_max) =
+                    Self::calc_convex_range(dy, x_c_min, x_c_max, e_vx, e_vy, s_vx, s_vy);
+                if g_min <= g_max {
+                    mask.set_row_range(
+                        y,
+                        (cx_f + g_min).ceil() as i32,
+                        (cx_f + g_max).floor() as i32,
+                        false,
+                    );
                 }
             }
         }
+
         mask
+    }
+
+    /// 2つのレイ（開始/終了）に挟まれた凸領域の x 範囲を計算する
+    fn calc_convex_range(
+        dy: f32,
+        x_min: f32,
+        x_max: f32,
+        s_vx: f32,
+        s_vy: f32,
+        e_vx: f32,
+        e_vy: f32,
+    ) -> (f32, f32) {
+        let (r1_min, r1_max) = Self::get_ray_x_limit(dy, s_vx, s_vy, true);
+        let (r2_min, r2_max) = Self::get_ray_x_limit(dy, e_vx, e_vy, false);
+        (x_min.max(r1_min).max(r2_min), x_max.min(r1_max).min(r2_max))
+    }
+
+    /// 特定のレイ（方向ベクトル vx, vy）による x の境界範囲を計算
+    fn get_ray_x_limit(dy: f32, vx: f32, vy: f32, is_start: bool) -> (f32, f32) {
+        let eps = 1e-6;
+        if vy.abs() < eps {
+            // 水平レイ: dy の正負とベクトルの向きで全範囲か無効範囲かが決まる
+            let ok = if is_start {
+                vx * dy >= -eps
+            } else {
+                vx * dy <= eps
+            };
+            if ok {
+                (f32::NEG_INFINITY, f32::INFINITY)
+            } else {
+                (f32::INFINITY, f32::NEG_INFINITY)
+            }
+        } else {
+            let x_limit = (vx * dy + if is_start { eps } else { -eps }) / vy;
+            if vy > 0.0 {
+                if is_start {
+                    (f32::NEG_INFINITY, x_limit)
+                } else {
+                    (x_limit, f32::INFINITY)
+                }
+            } else {
+                if is_start {
+                    (x_limit, f32::INFINITY)
+                } else {
+                    (f32::NEG_INFINITY, x_limit)
+                }
+            }
+        }
     }
 
     /// 遮蔽物（opaque_board）を考慮した視界マスクを生成
@@ -130,15 +199,30 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         // 8つのオクタントに対して走査を行う
         // 方向ベクトル組: (xx, xy, yx, yy)
         let directions = [
-            (1, 0, 0, -1),  (0, 1, -1, 0),  (0, 1, 1, 0),   (-1, 0, 0, 1),
-            (-1, 0, 0, -1), (0, -1, -1, 0), (0, -1, 1, 0),  (1, 0, 0, 1)
+            (1, 0, 0, -1),
+            (0, 1, -1, 0),
+            (0, 1, 1, 0),
+            (-1, 0, 0, 1),
+            (-1, 0, 0, -1),
+            (0, -1, -1, 0),
+            (0, -1, 1, 0),
+            (1, 0, 0, 1),
         ];
 
         for (xx, xy, yx, yy) in directions {
             self.scan_octant(
-                &mut mask, cx, cy, radius, 1, 1.0, 0.0, 
-                xx, xy, yx, yy, 
-                opaque_board
+                &mut mask,
+                cx,
+                cy,
+                radius,
+                1,
+                1.0,
+                0.0,
+                xx,
+                xy,
+                yx,
+                yy,
+                opaque_board,
             );
         }
 
@@ -146,6 +230,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     }
 
     /// 再帰的シャドウキャスティングの走査コアロジック
+    #[allow(clippy::too_many_arguments)]
     fn scan_octant(
         &self,
         mask: &mut BitBoard<W, H>,
@@ -155,7 +240,10 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         row: i32,
         mut start_slope: f32,
         end_slope: f32,
-        xx: i32, xy: i32, yx: i32, yy: i32,
+        xx: i32,
+        xy: i32,
+        yx: i32,
+        yy: i32,
         opaque_board: &BitBoard<W, H>,
     ) {
         if start_slope < end_slope {
@@ -203,10 +291,18 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                     next_start_slope = l_slope;
                 } else if last_was_opaque == 0 && is_opaque {
                     self.scan_octant(
-                        mask, cx, cy, radius, distance + 1, 
-                        start_slope, r_slope, 
-                        xx, xy, yx, yy, 
-                        opaque_board
+                        mask,
+                        cx,
+                        cy,
+                        radius,
+                        distance + 1,
+                        start_slope,
+                        r_slope,
+                        xx,
+                        xy,
+                        yx,
+                        yy,
+                        opaque_board,
                     );
                 }
 
