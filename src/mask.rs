@@ -3,7 +3,7 @@ use crate::BitBoard;
 impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// 指定した矩形範囲のみを 1 にしたマスクを作成
     /// 範囲情報の高速な抽出・制限に使用
-    pub fn rectangle_mask(x: i32, y: i32, width: i32, height: i32) -> Self {
+    pub fn mask_rect(x: i32, y: i32, width: i32, height: i32) -> Self {
         let mut mask = Self::default();
 
         let x1 = x.max(0) as usize;
@@ -53,7 +53,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         mask
     }
 
-    pub fn sector_mask(
+    pub fn mask_sector(
         cx: i32,
         cy: i32,
         radius: f32,
@@ -95,7 +95,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             let x_c_max = dx_limit;
 
             if is_circle {
-                mask.set_row_range(
+                mask.set_row(
                     y,
                     (cx_f + x_c_min).ceil() as i32,
                     (cx_f + x_c_max).floor() as i32,
@@ -105,7 +105,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 let (f_min, f_max) =
                     Self::calc_convex_range(dy, x_c_min, x_c_max, s_vx, s_vy, e_vx, e_vy);
                 if f_min <= f_max {
-                    mask.set_row_range(
+                    mask.set_row(
                         y,
                         (cx_f + f_min).ceil() as i32,
                         (cx_f + f_max).floor() as i32,
@@ -114,7 +114,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 }
             } else {
                 // 凹型: 円を塗ってから「隙間（逆側の凸セクター）」を消去
-                mask.set_row_range(
+                mask.set_row(
                     y,
                     (cx_f + x_c_min).ceil() as i32,
                     (cx_f + x_c_max).floor() as i32,
@@ -123,7 +123,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 let (g_min, g_max) =
                     Self::calc_convex_range(dy, x_c_min, x_c_max, e_vx, e_vy, s_vx, s_vy);
                 if g_min <= g_max {
-                    mask.set_row_range(
+                    mask.set_row(
                         y,
                         (cx_f + g_min).ceil() as i32,
                         (cx_f + g_max).floor() as i32,
@@ -186,7 +186,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
     /// 遮蔽物（opaque_board）を考慮した視界マスクを生成
     /// 再帰的シャドウキャスティング（Recursive Shadowcasting）を用いて計算
-    pub fn compute_visibility_mask(
+    pub fn mask_visibility(
         &self,
         cx: i32,
         cy: i32,
@@ -324,10 +324,10 @@ mod tests {
     type TestBoard = BitBoard<256, 256>;
 
     #[test]
-    fn test_rectangle_mask() {
+    fn test_mask_rect() {
         // 64タイルを跨ぐ矩形 (x=60, w=10)
         // word 0 の bits 60-63 と word 1 の bits 0-5 が 1 になるはず
-        let mask = TestBoard::rectangle_mask(60, 0, 10, 1);
+        let mask = TestBoard::mask_rect(60, 0, 10, 1);
 
         assert!(mask.get(60, 0));
         assert!(mask.get(63, 0));
@@ -347,19 +347,19 @@ mod tests {
     }
 
     #[test]
-    fn test_sector_mask() {
+    fn test_mask_sector() {
         let cx = 100;
         let cy = 100;
         let radius = 10.0;
 
         // 全円
-        let circle = TestBoard::sector_mask(cx, cy, radius, 0.0, 360.0);
+        let circle = TestBoard::mask_sector(cx, cy, radius, 0.0, 360.0);
         assert!(circle.get(cx, cy));
         assert!(circle.get(cx + 10, cy));
         assert!(!circle.get(cx + 11, cy));
 
         // 右下 90 度の扇形
-        let sector = TestBoard::sector_mask(cx, cy, radius, 0.0, 90.0);
+        let sector = TestBoard::mask_sector(cx, cy, radius, 0.0, 90.0);
         assert!(sector.get(cx + 5, cy + 5)); // 右下
         assert!(!sector.get(cx - 5, cy + 5)); // 左下は範囲外
     }

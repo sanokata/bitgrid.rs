@@ -85,7 +85,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     }
 
     /// フラットインデックス形式でビットを取得
-    pub fn get_at_index(&self, idx: usize) -> bool {
+    pub fn get_by_index(&self, idx: usize) -> bool {
         let (x, y) = Self::index_to_tile(idx);
         self.get(x, y)
     }
@@ -105,75 +105,18 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         }
     }
 
-    // --- Bulk Operations ---
-
-    /// 矩形範囲を一括で塗りつぶす (最適化版)
-    pub fn fill_rect(&mut self, x: i32, y: i32, width: i32, height: i32, value: bool) {
-        if width <= 0 || height <= 0 {
-            return;
-        }
-
-        let min_y = y.max(0);
-        let max_y = (y + height - 1).min((H as i32) - 1);
-        let min_x = x.max(0);
-        let max_x = (x + width - 1).min((W as i32) - 1);
-
-        if min_y > max_y || min_x > max_x {
-            return;
-        }
-
-        for current_y in min_y..=max_y {
-            self.set_row_range(current_y, min_x, max_x, value);
-        }
-    }
-
-    /// 指定した行の範囲に一括で値を設定 (内部ワード最適化)
-    pub fn set_row_range(&mut self, y: i32, min_x: i32, max_x: i32, value: bool) {
-        if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x < 0 {
-            return;
-        }
-
-        let min_x = min_x.max(0) as usize;
-        let max_x = max_x.min((W as i32) - 1) as usize;
-        let sw = (y as usize) * Self::ROW_U64S + min_x / 64;
-        let ew = (y as usize) * Self::ROW_U64S + max_x / 64;
-
-        if sw == ew {
-            let mask = Self::make_mask(min_x % 64, max_x % 64);
-            self.apply_word_mask(sw, mask, value);
-            return;
-        }
-
-        // 開始ワード
-        let s_mask = Self::make_mask(min_x % 64, 63);
-        self.apply_word_mask(sw, s_mask, value);
-
-        // 中間ワード
-        if ew > sw + 1 {
-            let mid_range = sw + 1..ew;
-            if value {
-                self.data[mid_range.clone()].fill(!0u64);
-                for w in mid_range {
-                    self.mark_word_non_empty(w);
-                }
-            } else {
-                self.data[mid_range.clone()].fill(0);
-                for w in mid_range {
-                    self.l1_mask[w / 64] &= !(1u64 << (w % 64));
-                }
-            }
-        }
-
-        // 終了ワード
-        let e_mask = Self::make_mask(0, max_x % 64);
-        self.apply_word_mask(ew, e_mask, value);
-    }
 
     // --- Queries ---
 
     /// いずれかのビットが立っているか判定 (L1マスクによる高速判定)
-    pub fn any_bits_set(&self) -> bool {
+    /// いずれかのビットが立っているか判定 (L1マスクによる高速判定)
+    pub fn has_any(&self) -> bool {
         self.l1_mask.iter().any(|&w| w != 0)
+    }
+
+    /// ビットが一つも立っていないか判定
+    pub fn is_empty(&self) -> bool {
+        !self.has_any()
     }
 
     /// 1（オン）状態のビット総数を取得 (L1マスクで空ワードをスキップ)
@@ -192,7 +135,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
 
     /// 指定した行の特定範囲内にビットが立っているか判定
     /// マスク演算による高速一括判定を実行
-    pub fn any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
+    pub fn has_any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
         if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x < 0 {
             return false;
         }
@@ -211,119 +154,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
             || (self.data[ew] & Self::make_mask(0, max_x % 64)) != 0
     }
 
-    // --- Iteration ---
 
-    /// 全てのオン（1）ビットを階層化マスクを利用して高速に走査
-    pub fn for_each_set_bit<F>(&self, mut callback: F)
-    where
-        F: FnMut(i32, i32, usize),
-    {
-        for l1_idx in 0..Self::L1_WORDS {
-            let mut l1_word = self.l1_mask[l1_idx];
-            let start_word_idx = l1_idx * 64;
-            
-            while l1_word != 0 {
-                let bit_in_l1 = l1_word.trailing_zeros();
-                l1_word &= l1_word - 1;
-
-                let word_idx = start_word_idx + bit_in_l1 as usize;
-                if word_idx >= Self::TOTAL_WORDS { break; }
-
-                let mut word_data = self.data[word_idx];
-                let y = (word_idx / Self::ROW_U64S) as i32;
-                let x_base = (word_idx % Self::ROW_U64S) * 64;
-                let y_base_idx = y as usize * W;
-
-                while word_data != 0 {
-                    let bit = word_data.trailing_zeros();
-                    word_data &= word_data - 1;
-
-                    let x = x_base as i32 + bit as i32;
-                    if x < W as i32 {
-                        callback(x, y, y_base_idx + x as usize);
-                    }
-                }
-            }
-        }
-    }
-
-    /// 別のボードとの積集合（AND）が 1 であるビットを指定範囲内のみ高速に走査
-    pub fn for_each_intersection<F>(&self, other: &Self, mut callback: F)
-    where
-        F: FnMut(i32, i32, usize),
-    {
-        for l1_idx in 0..Self::L1_WORDS {
-            let mut combined_l1 = self.l1_mask[l1_idx] & other.l1_mask[l1_idx];
-            let start_word_idx = l1_idx * 64;
-            
-            while combined_l1 != 0 {
-                let bit_in_l1 = combined_l1.trailing_zeros();
-                combined_l1 &= combined_l1 - 1;
-
-                let word_idx = start_word_idx + bit_in_l1 as usize;
-                if word_idx >= Self::TOTAL_WORDS { break; }
-
-                let mut combined_data = self.data[word_idx] & other.data[word_idx];
-                let y = (word_idx / Self::ROW_U64S) as i32;
-                let x_base = (word_idx % Self::ROW_U64S) * 64;
-                let y_base_idx = y as usize * W;
-
-                while combined_data != 0 {
-                    let bit = combined_data.trailing_zeros();
-                    combined_data &= combined_data - 1;
-
-                    let x = x_base as i32 + bit as i32;
-                    if x < W as i32 {
-                        callback(x, y, y_base_idx + x as usize);
-                    }
-                }
-            }
-        }
-    }
-
-    /// 指定したタイル範囲内でのみ、別のボードとの積集合（AND）を高速走査
-    pub fn for_each_intersection_in_range<F>(
-        &self,
-        other: &Self,
-        min_tile: (i32, i32),
-        max_tile: (i32, i32),
-        mut callback: F,
-    ) where
-        F: FnMut(i32, i32, usize),
-    {
-        let min_y = min_tile.1.max(0).min(H as i32 - 1) as usize;
-        let max_y = max_tile.1.max(0).min(H as i32 - 1) as usize;
-        let min_word_x = (min_tile.0.max(0) as usize) / 64;
-        let max_word_x = (max_tile.0.min(W as i32 - 1) as usize) / 64;
-
-        for y in min_y..=max_y {
-            let row_offset = y * Self::ROW_U64S;
-            let y_base_idx = y * W;
-
-            for word_x in min_word_x..=max_word_x {
-                let word_idx = row_offset + word_x;
-
-                // L1チェック
-                let l1_word_idx = word_idx / 64;
-                let bit_in_l1 = word_idx % 64;
-                if (self.l1_mask[l1_word_idx] & other.l1_mask[l1_word_idx] & (1u64 << bit_in_l1)) == 0 {
-                    continue;
-                }
-
-                let mut combined_data = self.data[word_idx] & other.data[word_idx];
-                let x_base = word_x * 64;
-                while combined_data != 0 {
-                    let bit = combined_data.trailing_zeros();
-                    combined_data &= combined_data - 1;
-
-                    let x = x_base as i32 + bit as i32;
-                    if x < W as i32 {
-                        callback(x, y as i32, y_base_idx + x as usize);
-                    }
-                }
-            }
-        }
-    }
 
     // --- Internal State Management & Accessors ---
 
@@ -385,38 +216,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         Some((word, bit))
     }
 
-    /// 特定ビット範囲のマスクを生成
-    #[inline]
-    fn make_mask(start_bit: usize, end_bit: usize) -> u64 {
-        let len = end_bit - start_bit + 1;
-        if len == 64 {
-            !0u64
-        } else {
-            ((1u64 << len) - 1) << start_bit
-        }
-    }
 
-
-    /// 特定のワードに対してマスクを適用し、L1 マスクを同期する
-    #[inline(always)]
-    fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
-        if value {
-            self.data[word_idx] |= mask;
-            self.mark_word_non_empty(word_idx);
-        } else {
-            self.data[word_idx] &= !mask;
-            self.recalc_l1_word(word_idx);
-        }
-    }
-
-    /// 指定インデックスのワードの状態に基づいて L1 マスクを再計算（低速パス）
-    fn recalc_l1_word(&mut self, word_idx: usize) {
-        if self.data[word_idx] == 0 {
-            self.l1_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
-        } else {
-            self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
-        }
-    }
 }
 
 impl<const W: usize, const H: usize> Default for BitBoard<W, H> {
@@ -515,46 +315,6 @@ mod tests {
         assert_eq!(bb.count_ones(), 3);
     }
 
-    #[test]
-    fn test_padding_leak() {
-        type SmallBoard = BitBoard<10, 2>;
-        let mut bb = SmallBoard::default();
-        bb = !bb;
 
-        let mut count = 0;
-        for (x, y) in bb.iter_set_bits() {
-            assert!(x >= 0 && x < 10, "Invalid x: {}", x);
-            assert!(y >= 0 && y < 2, "Invalid y: {}", y);
-            count += 1;
-        }
-        assert_eq!(count, 20, "Should only visit 20 bits");
 
-        let mut intersect_count = 0;
-        bb.for_each_intersection(&bb, |x, y, _idx| {
-            assert!(x >= 0 && x < 10, "Invalid x in intersection: {}", x);
-            assert!(y >= 0 && y < 2, "Invalid y in intersection: {}", y);
-            intersect_count += 1;
-        });
-        assert_eq!(intersect_count, 20);
-    }
-
-    #[test]
-    fn test_for_each_intersection_in_range() {
-        let mut bb1 = TestBoard::default();
-        let mut bb2 = TestBoard::default();
-        bb1.set(100, 100, true);
-        bb2.set(100, 100, true);
-        bb1.set(200, 100, true);
-        bb2.set(200, 100, true);
-        bb1.set(100, 200, true);
-        bb2.set(100, 200, true);
-
-        let mut hits = Vec::new();
-        bb1.for_each_intersection_in_range(&bb2, (90, 90), (110, 110), |x, y, _| {
-            hits.push((x, y));
-        });
-
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0], (100, 100));
-    }
 }
