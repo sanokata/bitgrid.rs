@@ -1,24 +1,24 @@
-use crate::BitBoard;
+use crate::{BitBoard, BitLayout};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
 // ─────────────── マクロ定義 ───────────────────────────────
 
 /// 疎なビットボード向けの二項演算を実装するマクロ
 macro_rules! impl_sparse_binop {
-    ($Trait:ident, $method:ident, $l1_op:tt, $data_op:tt) => {
-        impl<const W: usize, const H: usize> $Trait for &BitBoard<W, H> {
-            type Output = BitBoard<W, H>;
+    ($Trait:ident, $method:ident, $block_op:tt, $data_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait for &BitBoard<W, H, L> {
+            type Output = BitBoard<W, H, L>;
             fn $method(self, rhs: Self) -> Self::Output {
                 let mut result = BitBoard::new();
-                for i in 0..BitBoard::<W, H>::L1_WORDS {
-                    let mut bits = self.l1_mask[i] $l1_op rhs.l1_mask[i];
+                for i in 0..BitBoard::<W, H, L>::block_words() {
+                    let mut bits = self.block_mask[i] $block_op rhs.block_mask[i];
                     while bits != 0 {
                         let bit = bits.trailing_zeros();
                         let idx = i * 64 + bit as usize;
                         let val = self.data[idx] $data_op rhs.data[idx];
                         if val != 0 {
                             result.data[idx] = val;
-                            result.l1_mask[i] |= 1u64 << bit;
+                            result.block_mask[i] |= 1u64 << bit;
                         }
                         bits &= bits - 1;
                     }
@@ -31,18 +31,18 @@ macro_rules! impl_sparse_binop {
 
 /// 疎なビットボード向けの代入演算を実装するマクロ
 macro_rules! impl_sparse_assign_op {
-    ($Trait:ident, $method:ident, $l1_union:tt, $data_op:tt) => {
-        impl<const W: usize, const H: usize> $Trait<&BitBoard<W, H>> for BitBoard<W, H> {
-            fn $method(&mut self, rhs: &BitBoard<W, H>) {
-                for i in 0..BitBoard::<W, H>::L1_WORDS {
-                    let mut bits = self.l1_mask[i] $l1_union rhs.l1_mask[i];
-                    self.l1_mask[i] = 0;
+    ($Trait:ident, $method:ident, $block_union:tt, $data_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait<&BitBoard<W, H, L>> for BitBoard<W, H, L> {
+            fn $method(&mut self, rhs: &BitBoard<W, H, L>) {
+                for i in 0..BitBoard::<W, H, L>::block_words() {
+                    let mut bits = self.block_mask[i] $block_union rhs.block_mask[i];
+                    self.block_mask[i] = 0;
                     while bits != 0 {
                         let bit = bits.trailing_zeros();
                         let idx = i * 64 + bit as usize;
                         self.data[idx] $data_op rhs.data[idx];
                         if self.data[idx] != 0 {
-                            self.l1_mask[i] |= 1u64 << bit;
+                            self.block_mask[i] |= 1u64 << bit;
                         }
                         bits &= bits - 1;
                     }
@@ -54,7 +54,7 @@ macro_rules! impl_sparse_assign_op {
 
 // ─────────────── トレイト実装 ───────────────────────────────
 
-// AND: 結果が疎になりやすいため L1 マスクでスキップ
+// AND: 結果が疎になりやすいため ブロックマスク でスキップ
 impl_sparse_binop!(BitAnd, bitand, &, &);
 impl_sparse_assign_op!(BitAndAssign, bitand_assign, |, &=);
 
@@ -62,71 +62,49 @@ impl_sparse_assign_op!(BitAndAssign, bitand_assign, |, &=);
 impl_sparse_binop!(BitXor, bitxor, |, ^);
 impl_sparse_assign_op!(BitXorAssign, bitxor_assign, |, ^=);
 
-// OR: 結果が密になりやすく、単純なループの方が CPU のキャッシュ効率と SIMD 最適化が効くため線形走査
-impl<const W: usize, const H: usize> BitOr for &BitBoard<W, H> {
-    type Output = BitBoard<W, H>;
-    fn bitor(self, rhs: Self) -> Self::Output {
-        let mut result = BitBoard::new();
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            result.data[i] = self.data[i] | rhs.data[i];
-        }
-        for i in 0..BitBoard::<W, H>::L1_WORDS {
-            result.l1_mask[i] = self.l1_mask[i] | rhs.l1_mask[i];
-        }
-        result
-    }
-}
-
-impl<const W: usize, const H: usize> BitOrAssign<&BitBoard<W, H>> for BitBoard<W, H> {
-    fn bitor_assign(&mut self, rhs: &BitBoard<W, H>) {
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
-            self.data[i] |= rhs.data[i];
-        }
-        for i in 0..BitBoard::<W, H>::L1_WORDS {
-            self.l1_mask[i] |= rhs.l1_mask[i];
-        }
-    }
-}
+// OR: 結果が密になりやすいが、入力が疎な場合にはブロックスキップが有効
+impl_sparse_binop!(BitOr, bitor, |, |);
+impl_sparse_assign_op!(BitOrAssign, bitor_assign, |, |=);
 
 // NOT: 全ビット反転
-impl<const W: usize, const H: usize> Not for &BitBoard<W, H> {
-    type Output = BitBoard<W, H>;
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for &BitBoard<W, H, L> {
+    type Output = BitBoard<W, H, L>;
     fn not(self) -> Self::Output {
         let mut result = BitBoard::new();
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
+        for i in 0..BitBoard::<W, H, L>::total_words() {
             result.data[i] = !self.data[i];
         }
         result.clear_padding();
-        result.rebuild_l1();
+        result.rebuild_block_mask();
         result
     }
 }
 
-impl<const W: usize, const H: usize> Not for BitBoard<W, H> {
-    type Output = BitBoard<W, H>;
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for BitBoard<W, H, L> {
+    type Output = BitBoard<W, H, L>;
     fn not(mut self) -> Self::Output {
-        for i in 0..BitBoard::<W, H>::TOTAL_WORDS {
+        for i in 0..BitBoard::<W, H, L>::total_words() {
             self.data[i] = !self.data[i];
         }
         self.clear_padding();
-        self.rebuild_l1();
+        self.rebuild_block_mask();
         self
     }
 }
 
 // ─────────────── 所有権ベースの演算子 ───────────────────────────────
 
-impl<const W: usize, const H: usize> BitAnd for BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitAnd for BitBoard<W, H, L> {
     type Output = Self;
     fn bitand(mut self, rhs: Self) -> Self::Output { self &= &rhs; self }
 }
 
-impl<const W: usize, const H: usize> BitOr for BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitOr for BitBoard<W, H, L> {
     type Output = Self;
     fn bitor(mut self, rhs: Self) -> Self::Output { self |= &rhs; self }
 }
 
-impl<const W: usize, const H: usize> BitXor for BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitXor for BitBoard<W, H, L> {
     type Output = Self;
     fn bitxor(mut self, rhs: Self) -> Self::Output { self ^= &rhs; self }
 }

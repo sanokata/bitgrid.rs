@@ -1,6 +1,6 @@
-use crate::BitBoard;
+use crate::{BitBoard, BitLayout};
 
-impl<const W: usize, const H: usize> BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算
     /// 垂直・水平方向に (size - 1) 回のビットシフト AND を指数的に行い、全タイルの空きを確認
     pub fn fit_rect_anchor(&self, width: u32, height: u32) -> Self {
@@ -10,7 +10,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let mut current_h = 1;
         while current_h < height {
             let d = (height - current_h).min(current_h);
-            let shifted = res.shifted_v(-(d as i32));
+            let shifted = res.shifted_vertical(-(d as i32));
             res &= &shifted;
             current_h += d;
         }
@@ -19,7 +19,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         let mut current_w = 1;
         while current_w < width {
             let d = (width - current_w).min(current_w);
-            let shifted = res.shifted_h(-(d as i32));
+            let shifted = res.shifted_horizontal(-(d as i32));
             res &= &shifted;
             current_w += d;
         }
@@ -37,30 +37,26 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     }
 
     /// `flood_expand` のアロケーションフリー版。
+    /// `flood_expand` のアロケーション抑制版。
     pub fn flood_expand_into(&self, passable: &Self, visited: &mut Self, out: &mut Self) {
+        let mut temp = Self::new();
         out.clear();
 
         // 4方向展開 (上下左右)
-        let n = self.shifted_v(-1);
-        let s = self.shifted_v(1);
-        let e = self.shifted_h(1);
-        let w = self.shifted_h(-1);
-
-        *out |= &n;
-        *out |= &s;
-        *out |= &e;
-        *out |= &w;
+        self.shift_vertical_into(-1, &mut temp); *out |= &temp;
+        self.shift_vertical_into(1, &mut temp); *out |= &temp;
+        self.shift_horizontal_into(1, &mut temp); *out |= &temp;
+        self.shift_horizontal_into(-1, &mut temp); *out |= &temp;
 
         // 通行可能マスク適用、既訪問除外
-        let mut mask = visited.clone();
-        mask = !&mask; // NOT visited
-        mask &= passable; // NOT visited & passable
-        *out &= &mask;
+        // (visited を反転させたものをマスクとして使用)
+        for i in 0..Self::total_words() {
+            out.data[i] &= !visited.data[i] & passable.data[i];
+        }
         
-        // 既訪問リストの更新
+        // 既訪問リストの更新と後処理
+        out.rebuild_block_mask();
         *visited |= &*out;
-
-        out.finalize();
     }
 }
 

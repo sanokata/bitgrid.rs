@@ -1,60 +1,90 @@
-use crate::BitBoard;
+use crate::{BitBoard, BitLayout};
 
-impl<const W: usize, const H: usize> BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
-    /// セットされたビットを全方向（8方向）に膨張させる (指数的最適化版)
+    fn apply_morphology_with_buffer<S, Op>(
+        &mut self,
+        steps: u32,
+        buffer: &mut Self,
+        shift_into: S,
+        mut op: Op,
+    ) where
+        S: Fn(&Self, i32, &mut Self),
+        Op: FnMut(&mut Self, &Self),
+    {
+        let mut current_range = 0;
+        while current_range < steps {
+            let d = (steps - current_range).min(current_range + 1);
+            
+            // 正方向
+            shift_into(self, d as i32, buffer);
+            op(self, buffer);
+            
+            // 負方向
+            shift_into(self, -(d as i32), buffer);
+            op(self, buffer);
+            
+            current_range += d;
+        }
+    }
+
+    /// セットされたビットを全方向（8方向）に膨張させる (アロケート回避版)
+    pub fn dilate_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
+        if steps == 0 { return; }
+
+        self.apply_morphology_with_buffer(
+            steps,
+            buffer,
+            |b, d, dst| b.shift_horizontal_into(d, dst),
+            |r, s| *r |= s,
+        );
+
+        self.apply_morphology_with_buffer(
+            steps,
+            buffer,
+            |b, d, dst| b.shift_vertical_into(d, dst),
+            |r, s| *r |= s,
+        );
+
+        self.finalize();
+    }
+
+    /// セットされたビットを全方向（8方向）に膨張させる
     pub fn dilate(&self, steps: u32) -> Self {
         if steps == 0 { return self.clone(); }
         let mut res = self.clone();
-
-        // 1. 水平方向の膨張 (O(log N))
-        let mut current_range = 0;
-        while current_range < steps {
-            let d = (steps - current_range).min(current_range + 1);
-            let shifted_l = res.shifted_h(d as i32);
-            let shifted_r = res.shifted_h(-(d as i32));
-            res |= &(shifted_l | shifted_r);
-            current_range += d;
-        }
-
-        // 2. 垂直方向の膨張 (O(log N))
-        let mut current_range = 0;
-        while current_range < steps {
-            let d = (steps - current_range).min(current_range + 1);
-            let shifted_u = res.shifted_v(d as i32);
-            let shifted_d = res.shifted_v(-(d as i32));
-            res |= &(shifted_u | shifted_d);
-            current_range += d;
-        }
-        res.finalize();
+        let mut buffer = Self::new();
+        res.dilate_with_buffer(steps, &mut buffer);
         res
     }
 
-    /// セットされたビットを全方向（8方向）に収縮させる (指数的最適化版)
+    /// セットされたビットを全方向（8方向）に収縮させる (アロケート回避版)
+    pub fn erode_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
+        if steps == 0 { return; }
+
+        self.apply_morphology_with_buffer(
+            steps,
+            buffer,
+            |b, d, dst| b.shift_horizontal_into(d, dst),
+            |r, s| *r &= s,
+        );
+
+        self.apply_morphology_with_buffer(
+            steps,
+            buffer,
+            |b, d, dst| b.shift_vertical_into(d, dst),
+            |r, s| *r &= s,
+        );
+
+        self.finalize();
+    }
+
+    /// セットされたビットを全方向（8方向）に収縮させる
     pub fn erode(&self, steps: u32) -> Self {
         if steps == 0 { return self.clone(); }
         let mut res = self.clone();
-
-        // 1. 水平方向の収縮
-        let mut current_range = 0;
-        while current_range < steps {
-            let d = (steps - current_range).min(current_range + 1);
-            let shifted_l = res.shifted_h(d as i32);
-            let shifted_r = res.shifted_h(-(d as i32));
-            res &= &(shifted_l & shifted_r);
-            current_range += d;
-        }
-
-        // 2. 垂直方向の収縮
-        let mut current_range = 0;
-        while current_range < steps {
-            let d = (steps - current_range).min(current_range + 1);
-            let shifted_u = res.shifted_v(d as i32);
-            let shifted_d = res.shifted_v(-(d as i32));
-            res &= &(shifted_u & shifted_d);
-            current_range += d;
-        }
-        res.finalize();
+        let mut buffer = Self::new();
+        res.erode_with_buffer(steps, &mut buffer);
         res
     }
 }
@@ -107,34 +137,34 @@ mod tests {
     }
 
     #[test]
-    fn test_shifted_h_edge_cases() {
+    fn test_shifted_horizontal_edge_cases() {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
         
-        let sh_l = bb.shifted_h(-1); // 東から西へ (x-)
+        let sh_l = bb.shifted_horizontal(-1); // 東から西へ (x-)
         assert!(!sh_l.get(0, 0)); 
         assert_eq!(sh_l.count_ones(), 0); // 画面外へ
         
-        let sh_r = bb.shifted_h(255); // 西から東へ (x+)
+        let sh_r = bb.shifted_horizontal(255); // 西から東へ (x+)
         assert!(sh_r.get(255, 0));
         
-        let sh_r_out = bb.shifted_h(256); // 画面外へ
+        let sh_r_out = bb.shifted_horizontal(256); // 画面外へ
         assert_eq!(sh_r_out.count_ones(), 0);
     }
     
     #[test]
-    fn test_shifted_v_edge_cases() {
+    fn test_shifted_vertical_edge_cases() {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
         
-        let sh_u = bb.shifted_v(-1); // 上へ (y-)
+        let sh_u = bb.shifted_vertical(-1); // 上へ (y-)
         assert!(!sh_u.get(0, 0));
         assert_eq!(sh_u.count_ones(), 0); // 画面外へ
         
-        let sh_d = bb.shifted_v(255); // 下へ (y+)
+        let sh_d = bb.shifted_vertical(255); // 下へ (y+)
         assert!(sh_d.get(0, 255));
         
-        let sh_d_out = bb.shifted_v(256); // 画面外へ
+        let sh_d_out = bb.shifted_vertical(256); // 画面外へ
         assert_eq!(sh_d_out.count_ones(), 0);
     }
 }
