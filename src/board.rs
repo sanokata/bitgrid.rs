@@ -32,6 +32,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 
     /// 行末パディング用のマスク
+    #[allow(dead_code)]
     pub(crate) fn padding_mask() -> u64 {
         L::padding_mask()
     }
@@ -119,6 +120,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 
     /// 内部的な初期化用
+    #[allow(dead_code)]
     pub(crate) fn new_with_mask(
         data: Box<[u64]>,
         block_mask: Box<[u64]>,
@@ -127,11 +129,13 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 
     /// 指定インデックスのワードが非空であることを ブロック マスクに反映
+    #[allow(dead_code)]
     pub(crate) fn mark_word_non_empty(&mut self, word_idx: usize) {
         self.block_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
     }
 
     /// 特定のワードに対してマスクを適用し、ブロック マスクを同期する
+    #[allow(dead_code)]
     pub(crate) fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
         if value {
             self.data[word_idx] |= mask;
@@ -143,6 +147,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 
     /// 指定インデックスのワードの状態に基づいて ブロック マスクを再計算（低速パス）
+    #[allow(dead_code)]
     pub(crate) fn recalc_block_word(&mut self, word_idx: usize) {
         if self.data[word_idx] == 0 {
             self.block_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));

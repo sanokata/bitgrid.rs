@@ -47,7 +47,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
     }
 
     fn has_padding() -> bool {
-        W % 64 != 0
+        !W.is_multiple_of(64)
     }
 
     fn padding_mask() -> u64 {

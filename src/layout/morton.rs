@@ -75,8 +75,8 @@ impl MortonLayout {
     {
         dst.fill(0);
         dst_block.fill(0);
-        for block_idx in 0..block.len() {
-            let mut block_word = block[block_idx];
+        for (block_idx, &block_val) in block.iter().enumerate() {
+            let mut block_word = block_val;
             while block_word != 0 {
                 let bit = block_word.trailing_zeros();
                 block_word &= block_word - 1;
