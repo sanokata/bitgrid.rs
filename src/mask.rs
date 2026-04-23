@@ -1,56 +1,12 @@
-use crate::BitBoard;
+use crate::{BitBoard, BitLayout};
 
-impl<const W: usize, const H: usize> BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 指定した矩形範囲のみを 1 にしたマスクを作成
     /// 範囲情報の高速な抽出・制限に使用
     pub fn mask_rect(x: i32, y: i32, width: i32, height: i32) -> Self {
-        let mut mask = Self::default();
-
-        let x1 = x.max(0) as usize;
-        let y1 = y.max(0) as usize;
-        let x2 = (x + width).max(0).min(W as i32) as usize;
-        let y2 = (y + height).max(0).min(H as i32) as usize;
-
-        if x1 >= x2 || y1 >= y2 {
-            return mask;
-        }
-
-        let start_word = x1 / 64;
-        let end_word = (x2 - 1) / 64;
-        let start_mask = !0u64 << (x1 % 64);
-        let end_mask = !0u64 >> (63 - ((x2 - 1) % 64));
-
-        // 1. 最初の行 (y1) のパターンを作成
-        let first_row_offset = y1 * Self::ROW_U64S;
-        if start_word == end_word {
-            mask.data[first_row_offset + start_word] = start_mask & end_mask;
-        } else {
-            mask.data[first_row_offset + start_word] = start_mask;
-            if end_word > start_word + 1 {
-                mask.data[first_row_offset + start_word + 1..first_row_offset + end_word]
-                    .fill(!0u64);
-            }
-            mask.data[first_row_offset + end_word] = end_mask;
-        }
-
-        // 2. 最初の行を他の行に高速コピー (memmove)
-        if y2 > y1 + 1 {
-            let row_range = first_row_offset..first_row_offset + Self::ROW_U64S;
-            for row in y1 + 1..y2 {
-                let dest_offset = row * Self::ROW_U64S;
-                mask.data.copy_within(row_range.clone(), dest_offset);
-            }
-        }
-
-        // 3. L1 マスクを一括更新
-        for row in y1..y2 {
-            let row_base = row * Self::ROW_U64S;
-            for w in start_word..=end_word {
-                mask.mark_word_non_empty(row_base + w);
-            }
-        }
-
-        mask
+        let mut res = Self::new();
+        L::rect_op(&mut res.data, &mut res.block_mask, x, y, width, height, true);
+        res
     }
 
     pub fn mask_sector(
@@ -191,7 +147,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         cx: i32,
         cy: i32,
         radius: f32,
-        opaque_board: &BitBoard<W, H>,
+        opaque_board: &BitBoard<W, H, L>,
     ) -> Self {
         let mut mask = Self::default();
         mask.set(cx, cy, true); // 立っている位置は必ず見える
@@ -233,7 +189,7 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     #[allow(clippy::too_many_arguments)]
     fn scan_octant(
         &self,
-        mask: &mut BitBoard<W, H>,
+        mask: &mut BitBoard<W, H, L>,
         cx: i32,
         cy: i32,
         radius: f32,
@@ -244,18 +200,16 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         xy: i32,
         yx: i32,
         yy: i32,
-        opaque_board: &BitBoard<W, H>,
+        opaque_board: &BitBoard<W, H, L>,
     ) {
         if start_slope < end_slope {
             return;
         }
 
         let radius_sq = radius * radius;
-        let mut last_was_opaque = -1; // -1: 初期, 0: 透明, 1: 不透明
 
         for distance in row..=(radius.ceil() as i32) {
-            let mut next_start_slope = start_slope;
-            let mut row_fully_blocked = true;
+            let mut last_was_opaque = -1; // -1: initial, 0: trans, 1: opaque
 
             for i in 0..=distance {
                 // 事前に計算されたベクトルによる高速な座標変換
@@ -282,37 +236,44 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
                 // 距離チェック
                 if (dx * dx + dy * dy) as f32 <= radius_sq {
                     mask.set(x, y, true);
-                    row_fully_blocked = false;
                 }
 
                 let is_opaque = opaque_board.get(x, y);
 
-                if last_was_opaque == 1 && !is_opaque {
-                    next_start_slope = l_slope;
-                } else if last_was_opaque == 0 && is_opaque {
-                    self.scan_octant(
-                        mask,
-                        cx,
-                        cy,
-                        radius,
-                        distance + 1,
-                        start_slope,
-                        r_slope,
-                        xx,
-                        xy,
-                        yx,
-                        yy,
-                        opaque_board,
-                    );
+                if last_was_opaque == 1 {
+                    if !is_opaque {
+                        // Transition from opaque to transparent: shrink the wedge
+                        last_was_opaque = 0;
+                        start_slope = l_slope;
+                    }
+                } else {
+                    if is_opaque {
+                        // Transition from transparent to opaque: recurse for the visible segment
+                        if distance < radius as i32 && r_slope > end_slope {
+                            self.scan_octant(
+                                mask,
+                                cx,
+                                cy,
+                                radius,
+                                distance + 1,
+                                start_slope,
+                                r_slope,
+                                xx,
+                                xy,
+                                yx,
+                                yy,
+                                opaque_board,
+                            );
+                        }
+                        last_was_opaque = 1;
+                    }
                 }
-
-                last_was_opaque = if is_opaque { 1 } else { 0 };
             }
 
-            if last_was_opaque == 1 || row_fully_blocked {
+            // If the row ends with an opaque tile, the wedge is fully blocked for further distances
+            if last_was_opaque == 1 {
                 break;
             }
-            start_slope = next_start_slope;
         }
     }
 }
@@ -362,5 +323,21 @@ mod tests {
         let sector = TestBoard::mask_sector(cx, cy, radius, 0.0, 90.0);
         assert!(sector.get(cx + 5, cy + 5)); // 右下
         assert!(!sector.get(cx - 5, cy + 5)); // 左下は範囲外
+    }
+
+    #[test]
+    fn test_mask_visibility() {
+        let mut opaque = TestBoard::default();
+        // 壁を建てる (x=105, y=95..105)
+        for y in 95..=105 {
+            opaque.set(105, y, true);
+        }
+
+        let vis = TestBoard::default().mask_visibility(100, 100, 20.0, &opaque);
+        
+        assert!(vis.get(104, 100)); // 壁の直前は見えている
+        assert!(vis.get(105, 100)); // 壁そのものも見えている
+        assert!(!vis.get(106, 100), "Tile (106, 100) should be hidden by wall at (105, 100)"); 
+        assert!(vis.get(100, 120)); // 反対側は見えている
     }
 }

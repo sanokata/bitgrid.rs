@@ -1,24 +1,19 @@
-/// 行アライメントされたビットマップデータ構造
+use std::marker::PhantomData;
+use crate::layout::{BitLayout, RowMajorLayout};
+
+/// ビットマップデータ構造
 /// 型パラメータ W と H でボードサイズを型レベルで固定
-/// 内部的には Box<[u64]> で保持
+/// L でメモリレイアウトを指定 (デフォルトは行アライメント)
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct BitBoard<const W: usize, const H: usize> {
+pub struct BitBoard<const W: usize, const H: usize, L: BitLayout<W, H> = RowMajorLayout> {
     pub(crate) data: Box<[u64]>,
     /// 階層化マスク (Level 1): 各ビットは data[i] が 0 でないかを表す
-    pub(crate) l1_mask: Box<[u64]>,
+    pub(crate) block_mask: Box<[u64]>,
+    _layout: PhantomData<L>,
 }
 
-impl<const W: usize, const H: usize> BitBoard<W, H> {
-    // --- Constants & Static Utilities ---
-
-    /// 1行あたりの u64 ワード数
-    pub const ROW_U64S: usize = W.div_ceil(64);
-
-    /// data 内部配列の総要素数
-    pub const TOTAL_WORDS: usize = Self::ROW_U64S * H;
-
-    /// l1_mask 内部配列の要素数 (1ビットで1ワードをカバー)
-    pub const L1_WORDS: usize = Self::TOTAL_WORDS.div_ceil(64);
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
+    // --- Constants & Static Utilities --
 
     /// ボード幅（タイル数）
     pub const WIDTH: usize = W;
@@ -26,55 +21,59 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
     /// ボード高さ（タイル数）
     pub const HEIGHT: usize = H;
 
+    /// data 内部配列の総要素数
+    pub fn total_words() -> usize {
+        L::total_words()
+    }
+
+    /// block_mask 内部配列の要素数 (1ビットで1ワードをカバー)
+    pub fn block_words() -> usize {
+        Self::total_words().div_ceil(64)
+    }
+
     /// 行末パディング用のマスク
-    pub(crate) const PADDING_MASK: u64 = if W.is_multiple_of(64) {
-        !0u64
-    } else {
-        (1u64 << (W % 64)) - 1
-    };
+    pub(crate) fn padding_mask() -> u64 {
+        L::padding_mask()
+    }
 
     /// ワールド座標からタイル座標への公式な変換 (床関数を使用)
-    #[inline(always)]
     pub fn pos_to_tile(x: f32, y: f32) -> (i32, i32) {
         (x.floor() as i32, y.floor() as i32)
     }
 
-    /// タイル座標からフラットな空間インデックス (y * W + x) への変換
-    #[inline(always)]
+    /// タイル座標からフラットな空間インデックスへの変換
     pub fn tile_to_index(x: i32, y: i32) -> Option<usize> {
-        if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
-            None
-        } else {
-            Some(y as usize * W + x as usize)
-        }
+        L::coord_to_flat_index(x, y)
     }
 
     /// フラットインデックスからタイル座標への変換
-    #[inline(always)]
     pub fn index_to_tile(idx: usize) -> (i32, i32) {
-        ((idx % W) as i32, (idx / W) as i32)
+        L::flat_index_to_coord(idx)
     }
 
     // --- Creation & Life Cycle ---
 
     /// 全ビット 0 のボードを生成
     pub fn new() -> Self {
+        let total = Self::total_words();
+        let block_count = Self::block_words();
         Self {
-            data: vec![0u64; Self::TOTAL_WORDS].into_boxed_slice(),
-            l1_mask: vec![0u64; Self::L1_WORDS].into_boxed_slice(),
+            data: vec![0u64; total].into_boxed_slice(),
+            block_mask: vec![0u64; block_count].into_boxed_slice(),
+            _layout: PhantomData,
         }
     }
 
-    /// ボードの状態を整え、整合性を保証する（パディングのクリアとL1再構築）
+    /// ボードの状態を整え、整合性を保証する（パディングのクリアとブロック再構築）
     pub fn finalize(&mut self) {
         self.clear_padding();
-        self.rebuild_l1();
+        self.rebuild_block_mask();
     }
 
     /// ビットマップ全体を 0 でクリア
     pub fn clear(&mut self) {
         self.data.fill(0);
-        self.l1_mask.fill(0);
+        self.block_mask.fill(0);
     }
 
     // --- Basic Access & Mutation ---
@@ -95,66 +94,15 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         if let Some((word, bit)) = Self::idx(x, y) {
             if value {
                 self.data[word] |= 1u64 << bit;
-                self.l1_mask[word / 64] |= 1u64 << (word % 64);
+                self.block_mask[word / 64] |= 1u64 << (word % 64);
             } else {
                 self.data[word] &= !(1u64 << bit);
                 if self.data[word] == 0 {
-                    self.l1_mask[word / 64] &= !(1u64 << (word % 64));
+                    self.block_mask[word / 64] &= !(1u64 << (word % 64));
                 }
             }
         }
     }
-
-
-    // --- Queries ---
-
-    /// いずれかのビットが立っているか判定 (L1マスクによる高速判定)
-    /// いずれかのビットが立っているか判定 (L1マスクによる高速判定)
-    pub fn has_any(&self) -> bool {
-        self.l1_mask.iter().any(|&w| w != 0)
-    }
-
-    /// ビットが一つも立っていないか判定
-    pub fn is_empty(&self) -> bool {
-        !self.has_any()
-    }
-
-    /// 1（オン）状態のビット総数を取得 (L1マスクで空ワードをスキップ)
-    pub fn count_ones(&self) -> u32 {
-        let mut count = 0;
-        for l1_idx in 0..Self::L1_WORDS {
-            let mut l1_word = self.l1_mask[l1_idx];
-            while l1_word != 0 {
-                let bit = l1_word.trailing_zeros();
-                l1_word &= l1_word - 1;
-                count += self.data[l1_idx * 64 + bit as usize].count_ones();
-            }
-        }
-        count
-    }
-
-    /// 指定した行の特定範囲内にビットが立っているか判定
-    /// マスク演算による高速一括判定を実行
-    pub fn has_any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
-        if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x < 0 {
-            return false;
-        }
-
-        let min_x = min_x.max(0) as usize;
-        let max_x = max_x.min((W as i32) - 1) as usize;
-        let sw = (y as usize) * Self::ROW_U64S + min_x / 64;
-        let ew = (y as usize) * Self::ROW_U64S + max_x / 64;
-
-        if sw == ew {
-            return (self.data[sw] & Self::make_mask(min_x % 64, max_x % 64)) != 0;
-        }
-
-        (self.data[sw] & Self::make_mask(min_x % 64, 63)) != 0
-            || self.data[sw + 1..ew].iter().any(|&w| w != 0)
-            || (self.data[ew] & Self::make_mask(0, max_x % 64)) != 0
-    }
-
-
 
     // --- Internal State Management & Accessors ---
 
@@ -164,193 +112,105 @@ impl<const W: usize, const H: usize> BitBoard<W, H> {
         &self.data
     }
 
-    /// L1 層マスクへの読み取り専用アクセス
+    /// ブロック 層マスクへの読み取り専用アクセス
     #[allow(dead_code)]
-    pub(crate) fn l1_mask(&self) -> &[u64] {
-        &self.l1_mask
+    pub(crate) fn block_mask(&self) -> &[u64] {
+        &self.block_mask
     }
 
     /// 内部的な初期化用
-    #[allow(dead_code)]
     pub(crate) fn new_with_mask(
         data: Box<[u64]>,
-        l1_mask: Box<[u64]>,
+        block_mask: Box<[u64]>,
     ) -> Self {
-        Self { data, l1_mask }
+        Self { data, block_mask, _layout: PhantomData }
     }
 
-    /// 指定インデックスのワードが非空であることを L1 マスクに反映
-    #[inline]
+    /// 指定インデックスのワードが非空であることを ブロック マスクに反映
     pub(crate) fn mark_word_non_empty(&mut self, word_idx: usize) {
-        self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
+        self.block_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
     }
 
-    /// 特定ビット範囲のマスクを生成
-    #[inline]
-    pub(crate) fn make_mask(start_bit: usize, end_bit: usize) -> u64 {
-        let len = end_bit - start_bit + 1;
-        if len == 64 {
-            !0u64
-        } else {
-            ((1u64 << len) - 1) << start_bit
-        }
-    }
-
-    /// 特定のワードに対してマスクを適用し、L1 マスクを同期する
-    #[inline(always)]
+    /// 特定のワードに対してマスクを適用し、ブロック マスクを同期する
     pub(crate) fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
         if value {
             self.data[word_idx] |= mask;
             self.mark_word_non_empty(word_idx);
         } else {
             self.data[word_idx] &= !mask;
-            self.recalc_l1_word(word_idx);
+            self.recalc_block_word(word_idx);
         }
     }
 
-    /// 指定インデックスのワードの状態に基づいて L1 マスクを再計算（低速パス）
-    pub(crate) fn recalc_l1_word(&mut self, word_idx: usize) {
+    /// 指定インデックスのワードの状態に基づいて ブロック マスクを再計算（低速パス）
+    pub(crate) fn recalc_block_word(&mut self, word_idx: usize) {
         if self.data[word_idx] == 0 {
-            self.l1_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
+            self.block_mask[word_idx / 64] &= !(1u64 << (word_idx % 64));
         } else {
-            self.l1_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
+            self.block_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
         }
     }
 
-    /// 内部データの全走査により L1 マスクを再構築
-    pub fn rebuild_l1(&mut self) {
-        self.l1_mask.fill(0);
-        for i in 0..Self::TOTAL_WORDS {
+    /// 内部データの全走査により ブロック マスクを再構築
+    pub fn rebuild_block_mask(&mut self) {
+        self.block_mask.fill(0);
+        for i in 0..Self::total_words() {
             if self.data[i] != 0 {
-                self.l1_mask[i / 64] |= 1u64 << (i % 64);
+                self.block_mask[i / 64] |= 1u64 << (i % 64);
             }
         }
     }
 
     /// 行ごとの余剰ビット（パディング領域）を 0 クリア
     pub(crate) fn clear_padding(&mut self) {
-        if Self::PADDING_MASK != !0u64 {
-            for row in 0..H {
-                let last = row * Self::ROW_U64S + Self::ROW_U64S - 1;
-                self.data[last] &= Self::PADDING_MASK;
-            }
+        if !L::has_padding() { return; }
+        
+        let mask = L::padding_mask();
+        let row_u64s = W.div_ceil(64);
+        for row in 0..H {
+            let last = row * row_u64s + row_u64s - 1;
+            self.data[last] &= mask;
         }
     }
 
 
     /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
     pub(crate) fn idx(x: i32, y: i32) -> Option<(usize, u32)> {
-        if x < 0 || y < 0 || x >= W as i32 || y >= H as i32 {
-            return None;
-        }
-        let word = y as usize * Self::ROW_U64S + x as usize / 64;
-        let bit = (x as usize % 64) as u32;
-        Some((word, bit))
+        L::coord_to_word_bit(x, y)
     }
 
-    /// 水平方向に指定距離シフトした新しいボードを返す (内部用)
-    pub(crate) fn shifted_h(&self, dist: i32) -> Self {
+    /// 水平方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
+    pub fn shift_horizontal_into(&self, dist: i32, dst: &mut Self) {
+        dst.clear();
+        L::shift_horizontal(&self.data, &self.block_mask, &mut dst.data, &mut dst.block_mask, dist);
+        dst.clear_padding();
+    }
+
+    /// 垂直方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
+    pub fn shift_vertical_into(&self, dist: i32, dst: &mut Self) {
+        dst.clear();
+        L::shift_vertical(&self.data, &self.block_mask, &mut dst.data, &mut dst.block_mask, dist);
+        dst.clear_padding();
+    }
+
+    /// 水平方向に指定距離シフトした新しいボードを返す
+    pub fn shifted_horizontal(&self, dist: i32) -> Self {
         let mut res = Self::new();
-        if dist == 0 {
-            return self.clone();
-        }
-        let abs_dist = dist.abs() as usize;
-        if abs_dist >= W {
-            return res;
-        }
-
-        let word_dist = abs_dist / 64;
-        let bit_dist = (abs_dist % 64) as u32;
-
-        // L1マスクを活用して、64ワード（L1の1ビット分）単位で空の領域をスキップ
-        for l1_idx in 0..Self::L1_WORDS {
-            if self.l1_mask[l1_idx] == 0 {
-                continue;
-            }
-
-            let start_idx = l1_idx * 64;
-            let end_idx = (start_idx + 64).min(Self::TOTAL_WORDS);
-
-            for i in start_idx..end_idx {
-                let row = i / Self::ROW_U64S;
-                let _s = row * Self::ROW_U64S;
-                let col_word = i % Self::ROW_U64S;
-
-                if dist > 0 {
-                    // 西から東へ (左シフト)
-                    if col_word >= word_dist {
-                        let w = self.data[i - word_dist];
-                        let carry = if bit_dist > 0 && col_word > word_dist {
-                            self.data[i - word_dist - 1] >> (64 - bit_dist)
-                        } else {
-                            0
-                        };
-                        res.data[i] = (w << bit_dist) | carry;
-                    }
-                } else {
-                    // 東から西へ (右シフト)
-                    if col_word + word_dist < Self::ROW_U64S {
-                        let w = self.data[i + word_dist];
-                        let carry = if bit_dist > 0 && col_word + word_dist + 1 < Self::ROW_U64S {
-                            self.data[i + word_dist + 1] << (64 - bit_dist)
-                        } else {
-                            0
-                        };
-                        res.data[i] = (w >> bit_dist) | carry;
-                    }
-                }
-            }
-        }
-        res.finalize();
+        self.shift_horizontal_into(dist, &mut res);
         res
     }
 
-    /// 垂直方向に指定距離シフトした新しいボードを返す (内部用)
-    pub(crate) fn shifted_v(&self, dist: i32) -> Self {
+    /// 垂直方向に指定距離シフトした新しいボードを返す
+    pub fn shifted_vertical(&self, dist: i32) -> Self {
         let mut res = Self::new();
-        if dist == 0 {
-            return self.clone();
-        }
-        let abs_dist = dist.abs() as usize;
-        if abs_dist >= H {
-            return res;
-        }
-
-        let word_offset = abs_dist * Self::ROW_U64S;
-
-        // 垂直シフトも L1 マスクでスキップ（ソース領域が空ならコピー不要）
-        for l1_idx in 0..Self::L1_WORDS {
-            if self.l1_mask[l1_idx] == 0 {
-                continue;
-            }
-
-            let start_idx = l1_idx * 64;
-            let end_idx = (start_idx + 64).min(Self::TOTAL_WORDS);
-
-            if dist > 0 {
-                // 下へ (y+)
-                for i in start_idx..end_idx {
-                    if i + word_offset < Self::TOTAL_WORDS {
-                        res.data[i + word_offset] = self.data[i];
-                    }
-                }
-            } else {
-                // 上へ (y-)
-                for i in start_idx..end_idx {
-                    if i >= word_offset {
-                        res.data[i - word_offset] = self.data[i];
-                    }
-                }
-            }
-        }
-        res.finalize();
+        self.shift_vertical_into(dist, &mut res);
         res
     }
 
 
 }
 
-impl<const W: usize, const H: usize> Default for BitBoard<W, H> {
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> Default for BitBoard<W, H, L> {
     fn default() -> Self {
         Self::new()
     }
@@ -446,6 +306,48 @@ mod tests {
         assert_eq!(bb.count_ones(), 3);
     }
 
+    #[test]
+    fn morton_layout_basic() {
+        use crate::layout::MortonLayout;
+        type MortonBoard = BitBoard<256, 256, MortonLayout>;
+        let mut bb = MortonBoard::default();
+        bb.set(10, 20, true);
+        assert!(bb.get(10, 20));
+        assert!(!bb.get(20, 10));
+        bb.set(10, 20, false);
+        assert!(!bb.get(10, 20));
 
+        // Fill a row
+        for x in 0..100 {
+            bb.set(x, 50, true);
+        }
+        assert!(bb.has_any_in_row(50, 0, 99));
+        assert!(!bb.has_any_in_row(50, 100, 200));
+        assert!(!bb.has_any_in_row(51, 0, 99));
+    }
 
+    #[test]
+    fn test_coordinate_utilities() {
+        // pos_to_tile
+        assert_eq!(TestBoard::pos_to_tile(10.5, 20.9), (10, 20));
+        assert_eq!(TestBoard::pos_to_tile(-0.1, -1.5), (-1, -2));
+
+        // tile_to_index / index_to_tile
+        let idx = TestBoard::tile_to_index(10, 20).unwrap();
+        assert_eq!(TestBoard::index_to_tile(idx), (10, 20));
+    }
+
+    #[test]
+    fn test_shift_into_allocation_free() {
+        let mut bb = TestBoard::default();
+        bb.set(100, 100, true);
+        
+        let mut dst = TestBoard::default();
+        bb.shift_horizontal_into(10, &mut dst);
+        assert!(dst.get(110, 100));
+        assert!(!dst.get(100, 100));
+        
+        bb.shift_vertical_into(-20, &mut dst);
+        assert!(dst.get(100, 80));
+    }
 }
