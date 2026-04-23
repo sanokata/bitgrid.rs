@@ -174,7 +174,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
     }
 
     fn rect_op(data: &mut [u64], block: &mut [u64], x: i32, y: i32, width: i32, height: i32, value: bool) {
-        if y < 0 || y >= H as i32 || x + width <= 0 || x >= W as i32 || width <= 0 || height <= 0 { return; }
+        if y + height <= 0 || y >= H as i32 || x + width <= 0 || x >= W as i32 || width <= 0 || height <= 0 { return; }
         let y1 = y.max(0) as usize;
         let y2 = (y + height).min(H as i32) as usize;
         let x1 = x.max(0) as usize;
@@ -229,7 +229,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
     }
 
     fn set_row(data: &mut [u64], block: &mut [u64], y: i32, min_x: i32, max_x: i32, value: bool) {
-        if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x < 0 { return; }
+        if y < 0 || y >= H as i32 || min_x > max_x || min_x >= W as i32 || max_x <= -1 { return; }
         let min_x = min_x.max(0) as usize;
         let max_x = max_x.min((W as i32) - 1) as usize;
         let row_u64s = W.div_ceil(64);

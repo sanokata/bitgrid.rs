@@ -153,18 +153,55 @@ mod tests {
     }
     
     #[test]
-    fn test_shifted_vertical_edge_cases() {
+    fn test_morphology_at_boundaries() {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
         
-        let sh_u = bb.shifted_vertical(-1); // 上へ (y-)
-        assert!(!sh_u.get(0, 0));
-        assert_eq!(sh_u.count_ones(), 0); // 画面外へ
+        let d1 = bb.dilate(1);
+        assert_eq!(d1.count_ones(), 4); // (0,0), (1,0), (0,1), (1,1)
+        assert!(d1.get(1, 1));
+        assert!(!d1.get(2, 2));
         
-        let sh_d = bb.shifted_vertical(255); // 下へ (y+)
-        assert!(sh_d.get(0, 255));
+        bb.clear();
+        bb.set(255, 255, true);
+        let d2 = bb.dilate(1);
+        assert_eq!(d2.count_ones(), 4);
+        assert!(d2.get(254, 254));
+    }
+
+    #[test]
+    fn test_dilate_erode_cycle() {
+        let mut bb = TestBoard::default();
+        // 5x5 の矩形
+        for x in 100..105 {
+            for y in 100..105 {
+                bb.set(x, y, true);
+            }
+        }
         
-        let sh_d_out = bb.shifted_vertical(256); // 画面外へ
-        assert_eq!(sh_d_out.count_ones(), 0);
+        // 2ステップ膨張して2ステップ収縮
+        let cycle = bb.dilate(2).erode(2);
+        
+        // 元の形状に戻るはず（単純な矩形の場合）
+        assert_eq!(cycle.count_ones(), 25);
+        assert!(cycle.get(100, 100));
+        assert!(cycle.get(104, 104));
+        assert!(!cycle.get(99, 99));
+    }
+
+    #[test]
+    fn test_dilate_zero() {
+        let mut bb = TestBoard::default();
+        bb.set(10, 10, true);
+        let d0 = bb.dilate(0);
+        assert_eq!(d0.count_ones(), 1);
+        assert!(d0.get(10, 10));
+    }
+
+    #[test]
+    fn test_erode_empty() {
+        let bb = TestBoard::default();
+        let e1 = bb.erode(1);
+        assert!(e1.is_empty());
     }
 }

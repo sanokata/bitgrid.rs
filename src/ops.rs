@@ -141,12 +141,61 @@ mod tests {
     }
 
     #[test]
-    fn not_clears_padding_bits() {
-        type Bb = BitBoard<100, 10>;
-        let bb = Bb::default();
-        let not_bb = !&bb;
-        assert!(not_bb.get(0, 0));
-        assert!(not_bb.get(99, 9));
-        assert_eq!(not_bb.count_ones(), 100 * 10);
+    fn test_ops_identity_cases() {
+        let mut a = TestBoard::default();
+        a.set(10, 10, true);
+        
+        // OR with empty
+        let or_res = &a | &TestBoard::default();
+        assert_eq!(or_res.count_ones(), 1);
+        
+        // AND with self
+        let and_res = &a & &a;
+        assert_eq!(and_res.count_ones(), 1);
+        
+        // XOR with self
+        let xor_res = &a ^ &a;
+        assert_eq!(xor_res.count_ones(), 0);
+    }
+
+    #[test]
+    fn test_ops_with_padding() {
+        type Bb = BitBoard<100, 1>;
+        let mut a = Bb::default();
+        let mut b = Bb::default();
+        a.set(99, 0, true);
+        b.set(99, 0, true);
+        
+        let and_res = &a & &b;
+        assert_eq!(and_res.count_ones(), 1);
+        
+        let not_a = !&a;
+        assert_eq!(not_a.count_ones(), 99); // 100 - 1
+        assert!(!not_a.get(99, 0));
+    }
+
+    #[test]
+    fn test_not_empty_is_full() {
+        let empty = TestBoard::default();
+        let full = !empty;
+        assert_eq!(full.count_ones(), 256 * 256);
+        assert!(full.get(0, 0));
+        assert!(full.get(255, 255));
+    }
+
+    #[test]
+    fn test_ops_on_full_boards() {
+        let mut a = TestBoard::default();
+        let mut b = TestBoard::default();
+        a = !a; // Full
+        b.set(10, 10, true);
+        
+        let and_res = &a & &b;
+        assert_eq!(and_res.count_ones(), 1);
+        assert!(and_res.get(10, 10));
+        
+        let xor_res = &a ^ &b;
+        assert_eq!(xor_res.count_ones(), (256 * 256) - 1);
+        assert!(!xor_res.get(10, 10));
     }
 }

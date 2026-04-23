@@ -148,4 +148,32 @@ mod tests {
         assert!(!result.get(4, 0));
         assert!(!result.get(0, 4));
     }
+
+    #[test]
+    fn test_flood_expand_at_edges() {
+        type Bb = BitBoard<8, 8>;
+        let mut passable = Bb::default();
+        for y in 0..8 { for x in 0..8 { passable.set(x, y, true); } } // 全て通行可能
+
+        let mut frontier = Bb::default();
+        frontier.set(0, 0, true); // 左上隅
+        let mut visited = frontier.clone();
+
+        let next = frontier.flood_expand(&passable, &mut visited);
+        // 上(-y)と左(-x)には展開されず、右と下のみ展開されること
+        assert_eq!(next.count_ones(), 2);
+        assert!(next.get(1, 0));
+        assert!(next.get(0, 1));
+    }
+
+    #[test]
+    fn test_fit_rect_anchor_oversize() {
+        type Bb = BitBoard<8, 8>;
+        let mut passable = Bb::default();
+        for y in 0..8 { for x in 0..8 { passable.set(x, y, true); } }
+
+        // ボードサイズより大きい要求は全て false になるべき
+        let result = passable.fit_rect_anchor(10, 10);
+        assert!(result.is_empty());
+    }
 }

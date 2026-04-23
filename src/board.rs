@@ -343,16 +343,98 @@ mod tests {
     }
 
     #[test]
-    fn test_shift_into_allocation_free() {
+    fn test_block_mask_consistency() {
+        let mut bb = TestBoard::default();
+        // 疎な状態でセット
+        bb.set(10, 10, true);
+        bb.set(70, 10, true); // Word 1
+        
+        let word_idx_10 = TestBoard::idx(10, 10).unwrap().0;
+        let word_idx_70 = TestBoard::idx(70, 10).unwrap().0;
+        
+        assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) != 0);
+        assert!(bb.block_mask[word_idx_70 / 64] & (1 << (word_idx_70 % 64)) != 0);
+        
+        // クリア
+        bb.set(10, 10, false);
+        assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) == 0);
+        
+        // 完全にクリアされたか
+        bb.clear();
+        assert!(bb.block_mask.iter().all(|&w| w == 0));
+    }
+
+    #[test]
+    fn test_padding_safety() {
+        // 幅が64の倍数でないボード
+        type PaddingBoard = BitBoard<100, 2>;
+        let mut bb = PaddingBoard::default();
+        
+        // 有効範囲ギリギリ
+        bb.set(99, 0, true);
+        assert!(bb.get(99, 0));
+        
+        // パディング領域 (x=100..127) は無視されるか
+        bb.set(100, 0, true);
+        assert!(!bb.get(100, 0));
+        
+        // rebuild_block_mask がパディングを無視するか
+        bb.finalize();
+        assert_eq!(bb.count_ones(), 1);
+    }
+
+    #[test]
+    fn test_large_shifts() {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
         
-        let mut dst = TestBoard::default();
-        bb.shift_horizontal_into(10, &mut dst);
-        assert!(dst.get(110, 100));
-        assert!(!dst.get(100, 100));
+        // 盤面サイズ以上のシフト
+        let sh_h = bb.shifted_horizontal(256);
+        assert_eq!(sh_h.count_ones(), 0);
         
-        bb.shift_vertical_into(-20, &mut dst);
-        assert!(dst.get(100, 80));
+        let sh_v = bb.shifted_vertical(-300);
+        assert_eq!(sh_v.count_ones(), 0);
+        
+        // ギリギリのシフト
+        let sh_edge = bb.shifted_horizontal(155); // 100 + 155 = 255
+        assert!(sh_edge.get(255, 100));
+        assert_eq!(sh_edge.count_ones(), 1);
+    }
+
+    #[test]
+    fn test_individual_clear_consistency() {
+        let mut bb = TestBoard::default();
+        let x = 10;
+        let y = 10;
+        let (word_idx, _) = TestBoard::idx(x, y).unwrap();
+        
+        bb.set(x, y, true);
+        assert!(bb.block_mask[word_idx / 64] & (1 << (word_idx % 64)) != 0);
+        
+        bb.set(x, y, false);
+        assert!(bb.block_mask[word_idx / 64] & (1 << (word_idx % 64)) == 0, "block_mask should be cleared when last bit in word is unset");
+        assert_eq!(bb.count_ones(), 0);
+    }
+
+    #[test]
+    fn test_equality_and_clear() {
+        let mut bb1 = TestBoard::new();
+        let bb2 = TestBoard::new();
+        
+        bb1.set(50, 50, true);
+        bb1.clear();
+        
+        assert_eq!(bb1, bb2, "Cleared board should be equal to a new board");
+        assert_eq!(bb1.block_mask, bb2.block_mask);
+    }
+
+    #[test]
+    fn test_extreme_get_set() {
+        let mut bb = TestBoard::default();
+        // Should not panic
+        bb.set(i32::MAX, i32::MAX, true);
+        bb.set(i32::MIN, i32::MIN, true);
+        assert!(!bb.get(i32::MAX, i32::MAX));
+        assert!(!bb.get(i32::MIN, i32::MIN));
     }
 }

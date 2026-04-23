@@ -79,4 +79,58 @@ mod tests {
         assert!(!bb.get(9, 50));
         assert!(!bb.get(21, 50));
     }
+
+    #[test]
+    fn test_set_rect_out_of_bounds() {
+        let mut bb = TestBoard::default();
+        // 完全に画面外 (マイナス)
+        bb.set_rect(-20, -20, 10, 10, true);
+        assert!(bb.is_empty());
+
+        // 完全に画面外 (プラス)
+        bb.set_rect(300, 300, 10, 10, true);
+        assert!(bb.is_empty());
+
+        // 部分的に画面外にはみ出す
+        bb.set_rect(-5, -5, 10, 10, true); // x: -5..5, y: -5..5 -> (0,0) から (4,4) が塗られるはず
+        assert!(bb.get(0, 0));
+        assert!(bb.get(4, 4));
+        assert!(!bb.get(5, 5));
+        assert_eq!(bb.count_ones(), 25);
+    }
+
+    #[test]
+    fn test_set_rect_invalid_dimensions() {
+        let mut bb = TestBoard::default();
+        // Zero width or height
+        bb.set_rect(10, 10, 0, 5, true);
+        bb.set_rect(10, 10, 5, 0, true);
+        assert!(bb.is_empty());
+
+        // Negative width or height
+        bb.set_rect(10, 10, -5, 5, true);
+        bb.set_rect(10, 10, 5, -5, true);
+        assert!(bb.is_empty());
+    }
+
+    #[test]
+    fn test_set_row_out_of_bounds() {
+        let mut bb = TestBoard::default();
+        // y out of bounds
+        bb.set_row(-1, 0, 10, true);
+        bb.set_row(256, 0, 10, true);
+        assert!(bb.is_empty());
+
+        // x range out of bounds
+        bb.set_row(10, -10, -1, true);
+        bb.set_row(10, 256, 300, true);
+        assert!(bb.is_empty());
+
+        // x range partially out of bounds
+        bb.set_row(10, -5, 5, true); // 0..=5 should be set
+        assert!(bb.get(0, 10));
+        assert!(bb.get(5, 10));
+        assert!(!bb.get(6, 10));
+        assert_eq!(bb.count_ones(), 6);
+    }
 }
