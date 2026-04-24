@@ -1,7 +1,7 @@
 use super::BitLayout;
 
 /// Morton Order (Z-order curve) レイアウト
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MortonLayout;
 
 impl MortonLayout {

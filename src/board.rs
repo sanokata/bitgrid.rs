@@ -1,4 +1,5 @@
 use std::marker::PhantomData;
+use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use crate::layout::{BitLayout, RowMajorLayout};
 
 /// ビットマップデータ構造
@@ -211,13 +212,75 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.shift_vertical_into(dist, &mut res);
         res
     }
+}
 
+/// ビットボードの操作を抽象化するインターフェース
+pub trait BitBoardInterface: Send + Sync {
+    fn set(&mut self, x: i32, y: i32, value: bool);
+    fn get(&self, x: i32, y: i32) -> bool;
+    fn count_ones(&self) -> usize;
+    fn clear(&mut self);
+}
 
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoardInterface for BitBoard<W, H, L> {
+    fn set(&mut self, x: i32, y: i32, value: bool) {
+        self.set(x, y, value);
+    }
+    fn get(&self, x: i32, y: i32) -> bool {
+        self.get(x, y)
+    }
+    fn count_ones(&self) -> usize {
+        self.count_ones()
+    }
+    fn clear(&mut self) {
+        self.clear();
+    }
 }
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> Default for BitBoard<W, H, L> {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> Serialize for BitBoard<W, H, L> {
+    /// BitBoard をシリアライズします。
+    ///
+    /// `block_mask` は `data` から再計算可能な冗長データであるため、
+    /// `data` フィールドのみをシリアライズしてデータサイズを削減します。
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        self.data.serialize(serializer)
+    }
+}
+
+impl<'de, const W: usize, const H: usize, L: BitLayout<W, H>> Deserialize<'de> for BitBoard<W, H, L> {
+    /// BitBoard をデシリアライズします。
+    ///
+    /// `data` フィールドを復元した後、`rebuild_block_mask` を呼び出して
+    /// `block_mask` を再構築します。
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let data_vec: Vec<u64> = Vec::deserialize(deserializer)?;
+        let expected_len = Self::total_words();
+
+        if data_vec.len() != expected_len {
+            return Err(serde::de::Error::custom(format!(
+                "invalid data length for BitBoard<{}, {}>: got {}, expected {}",
+                W, H, data_vec.len(), expected_len
+            )));
+        }
+
+        let mut board = Self::new_with_mask(
+            data_vec.into_boxed_slice(),
+            vec![0u64; Self::block_words()].into_boxed_slice(),
+        );
+        board.rebuild_block_mask();
+        Ok(board)
     }
 }
 

@@ -9,7 +9,7 @@ mod expand;
 mod morphology;
 
 // 公開する主要な型とトレイト
-pub use board::BitBoard;
+pub use board::{BitBoard, BitBoardInterface};
 pub use layout::{BitLayout, RowMajorLayout, MortonLayout};
 pub use iter::BitBoardIter;
 

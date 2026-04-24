@@ -7,7 +7,7 @@ pub use row_major::RowMajorLayout;
 pub use morton::MortonLayout;
 
 /// BitBoard のメモリレイアウトを定義するトレイト
-pub trait BitLayout<const W: usize, const H: usize>: Default + Clone + Debug + PartialEq + Eq + Send + Sync + 'static {
+pub trait BitLayout<const W: usize, const H: usize>: Default + Clone + Debug + serde::Serialize + for<'de> serde::Deserialize<'de> + PartialEq + Eq + Send + Sync + 'static {
     /// 指定されたサイズに必要なワード数 (u64) を計算
     fn total_words() -> usize;
     

@@ -1,7 +1,7 @@
 use super::BitLayout;
 
 /// 標準的な行アライメントレイアウト (Row-Major)
-#[derive(Default, Clone, Debug, PartialEq, Eq)]
+#[derive(Default, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct RowMajorLayout;
 
 impl RowMajorLayout {

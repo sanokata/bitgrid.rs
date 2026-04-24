@@ -5,3 +5,4 @@ edition = "2024"
 
 # 依存関係なし（純粋なRust）
 [dependencies]
+serde = { version = "1.0", features = ["derive"] }
