@@ -43,4 +43,17 @@ pub trait BitLayout<const W: usize, const H: usize>: Default + Clone + Debug + s
 
     /// 指定行にビットが立っているか判定
     fn has_any_in_row(data: &[u64], y: i32, min_x: i32, max_x: i32) -> bool;
+
+    /// 指定行の範囲内がすべてセットされているか判定
+    fn is_all_in_row(data: &[u64], y: i32, min_x: i32, max_x: i32) -> bool;
+
+    /// ワールド座標 (f32) をタイル座標 (i32) に変換
+    fn world_to_tile(pos: (f32, f32)) -> (i32, i32) {
+        (pos.0.round() as i32, pos.1.round() as i32)
+    }
+
+    /// タイル座標 (i32) をワールド座標 (f32) に変換（中心座標）
+    fn tile_to_world(x: i32, y: i32) -> (f32, f32) {
+        (x as f32, y as f32)
+    }
 }
