@@ -38,13 +38,15 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         for block_idx in 0..Self::block_words() {
             let mut combined_block = self.block_mask[block_idx] & other.block_mask[block_idx];
             let start_word_idx = block_idx * 64;
-            
+
             while combined_block != 0 {
                 let bit_in_block = combined_block.trailing_zeros();
                 combined_block &= combined_block - 1;
 
                 let word_idx = start_word_idx + bit_in_block as usize;
-                if word_idx >= Self::total_words() { break; }
+                if word_idx >= Self::total_words() {
+                    break;
+                }
 
                 let mut combined_data = self.data[word_idx] & other.data[word_idx];
                 while combined_data != 0 {
@@ -99,6 +101,36 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
             }
         });
     }
+
+    /// 指定した矩形範囲（中心 x, y、半径 radius）内がすべてセット（1）されているか判定
+    pub fn is_area_all_set(&self, x: i32, y: i32, radius: i32) -> bool {
+        let x1 = x - radius;
+        let x2 = x + radius;
+        let y1 = y - radius;
+        let y2 = y + radius;
+
+        for cur_y in y1..=y2 {
+            if !L::is_all_in_row(&self.data, cur_y, x1, x2) {
+                return false;
+            }
+        }
+        true
+    }
+
+    /// 指定した矩形範囲（中心 x, y、半径 radius）内に一つでもセット（1）されたビットがあるか判定
+    pub fn is_area_any_set(&self, x: i32, y: i32, radius: i32) -> bool {
+        let x1 = x - radius;
+        let x2 = x + radius;
+        let y1 = y - radius;
+        let y2 = y + radius;
+
+        for cur_y in y1..=y2 {
+            if L::has_any_in_row(&self.data, cur_y, x1, x2) {
+                return true;
+            }
+        }
+        false
+    }
 }
 
 #[cfg(test)]
@@ -152,5 +184,38 @@ mod tests {
             count += 1;
         });
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_area_queries() {
+        let mut bb = TestBoard::default();
+        // (10, 10) を中心に 3x3 (radius=1) を塗りつぶす
+        for y in 9..=11 {
+            for x in 9..=11 {
+                bb.set(x, y, true);
+            }
+        }
+
+        // 正常系: すべてセットされている
+        assert!(bb.is_area_all_set(10, 10, 1)); // 3x3
+        assert!(bb.is_area_all_set(10, 10, 0)); // 1x1 中心
+        assert!(bb.is_area_any_set(10, 10, 2)); // より広い範囲
+
+        // 一部欠けている場合
+        bb.set(9, 9, false);
+        assert!(!bb.is_area_all_set(10, 10, 1));
+        assert!(bb.is_area_any_set(10, 10, 1));
+
+        // 完全に空の範囲
+        assert!(!bb.is_area_any_set(100, 100, 10));
+
+        // 境界条件: マップ端
+        let mut edge_bb = TestBoard::default();
+        edge_bb.set(0, 0, true);
+        assert!(edge_bb.is_area_all_set(0, 0, 0));
+        // radius=1 だと (-1, -1) 等を含むが、これは範囲外なので通常 false 扱い（または実装に依存）
+        // 現状の実装では範囲外は 0 (false) として扱うため、all_set は false になる
+        assert!(!edge_bb.is_area_all_set(0, 0, 1));
+        assert!(edge_bb.is_area_any_set(0, 0, 1));
     }
 }

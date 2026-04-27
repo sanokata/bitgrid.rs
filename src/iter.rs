@@ -7,7 +7,9 @@ pub struct BitBoardIter<'a, const W: usize, const H: usize, L: BitLayout<W, H>> 
     current_word: u64,
 }
 
-impl<'a, const W: usize, const H: usize, L: BitLayout<W, H>> Iterator for BitBoardIter<'a, W, H, L> {
+impl<'a, const W: usize, const H: usize, L: BitLayout<W, H>> Iterator
+    for BitBoardIter<'a, W, H, L>
+{
     type Item = (i32, i32);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -64,7 +66,6 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
             },
         }
     }
-
 }
 
 #[cfg(test)]

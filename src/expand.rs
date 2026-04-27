@@ -5,7 +5,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 垂直・水平方向に (size - 1) 回のビットシフト AND を指数的に行い、全タイルの空きを確認
     pub fn fit_rect_anchor(&self, width: u32, height: u32) -> Self {
         let mut res = self.clone();
-        
+
         // 垂直方向の縮小
         let mut current_h = 1;
         while current_h < height {
@@ -43,17 +43,21 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         out.clear();
 
         // 4方向展開 (上下左右)
-        self.shift_vertical_into(-1, &mut temp); *out |= &temp;
-        self.shift_vertical_into(1, &mut temp); *out |= &temp;
-        self.shift_horizontal_into(1, &mut temp); *out |= &temp;
-        self.shift_horizontal_into(-1, &mut temp); *out |= &temp;
+        self.shift_vertical_into(-1, &mut temp);
+        *out |= &temp;
+        self.shift_vertical_into(1, &mut temp);
+        *out |= &temp;
+        self.shift_horizontal_into(1, &mut temp);
+        *out |= &temp;
+        self.shift_horizontal_into(-1, &mut temp);
+        *out |= &temp;
 
         // 通行可能マスク適用、既訪問除外
         // (visited を反転させたものをマスクとして使用)
         for i in 0..Self::total_words() {
             out.data[i] &= !visited.data[i] & passable.data[i];
         }
-        
+
         // 既訪問リストの更新と後処理
         out.rebuild_block_mask();
         *visited |= &*out;
@@ -153,7 +157,11 @@ mod tests {
     fn test_flood_expand_at_edges() {
         type Bb = BitBoard<8, 8>;
         let mut passable = Bb::default();
-        for y in 0..8 { for x in 0..8 { passable.set(x, y, true); } } // 全て通行可能
+        for y in 0..8 {
+            for x in 0..8 {
+                passable.set(x, y, true);
+            }
+        } // 全て通行可能
 
         let mut frontier = Bb::default();
         frontier.set(0, 0, true); // 左上隅
@@ -170,7 +178,11 @@ mod tests {
     fn test_fit_rect_anchor_oversize() {
         type Bb = BitBoard<8, 8>;
         let mut passable = Bb::default();
-        for y in 0..8 { for x in 0..8 { passable.set(x, y, true); } }
+        for y in 0..8 {
+            for x in 0..8 {
+                passable.set(x, y, true);
+            }
+        }
 
         // ボードサイズより大きい要求は全て false になるべき
         let result = passable.fit_rect_anchor(10, 10);

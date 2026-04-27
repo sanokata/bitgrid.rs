@@ -3,12 +3,22 @@ use crate::{BitBoard, BitLayout};
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 矩形範囲を一括で塗りつぶす (最適化版)
     pub fn set_rect(&mut self, x: i32, y: i32, width: i32, height: i32, value: bool) {
-        L::rect_op(&mut self.data, &mut self.block_mask, x, y, width, height, value);
+        L::rect_op(
+            &mut self.data,
+            &mut self.block_mask,
+            x,
+            y,
+            width,
+            height,
+            value,
+        );
     }
 
     /// 指定した座標を中心とした十字形を塗りつぶす
     pub fn set_plus(&mut self, x: i32, y: i32, range: i32, value: bool) {
-        if range < 0 { return; }
+        if range < 0 {
+            return;
+        }
         // 垂直
         self.set_rect(x, y - range, 1, range * 2 + 1, value);
         // 水平
@@ -17,7 +27,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// 指定した座標を中心とした菱形（マンハッタン距離内）を塗りつぶす
     pub fn set_diamond(&mut self, x: i32, y: i32, range: i32, value: bool) {
-        if range < 0 { return; }
+        if range < 0 {
+            return;
+        }
         for dy in -range..=range {
             let h_width = range - dy.abs();
             self.set_row(y + dy, x - h_width, x + h_width, value);

@@ -1,17 +1,17 @@
 mod board;
 mod bulk;
+mod expand;
 mod iter;
 mod layout;
-mod query;
-mod ops;
 mod mask;
-mod expand;
 mod morphology;
+mod ops;
+mod query;
 
 // 公開する主要な型とトレイト
-pub use board::{BitBoard, BitBoardInterface};
-pub use layout::{BitLayout, RowMajorLayout, MortonLayout};
+pub use board::BitBoard;
 pub use iter::BitBoardIter;
+pub use layout::{BitLayout, MortonLayout, RowMajorLayout};
 
 #[cfg(test)]
 mod tests {

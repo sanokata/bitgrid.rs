@@ -5,7 +5,15 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 範囲情報の高速な抽出・制限に使用
     pub fn mask_rect(x: i32, y: i32, width: i32, height: i32) -> Self {
         let mut res = Self::new();
-        L::rect_op(&mut res.data, &mut res.block_mask, x, y, width, height, true);
+        L::rect_op(
+            &mut res.data,
+            &mut res.block_mask,
+            x,
+            y,
+            width,
+            height,
+            true,
+        );
         res
     }
 
@@ -177,21 +185,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         ];
 
         for (xx, xy, yx, yy) in directions {
-            self.scan_octant(
-                cx,
-                cy,
-                radius,
-                1,
-                1.0,
-                0.0,
-                xx,
-                xy,
-                yx,
-                yy,
-                opaque_board,
-            );
+            self.scan_octant(cx, cy, radius, 1, 1.0, 0.0, xx, xy, yx, yy, opaque_board);
         }
-        
+
         // 階層化マスクを更新（走査中に set を呼んでいるため）
         self.rebuild_block_mask();
     }
@@ -259,22 +255,20 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                 } else {
                     if is_opaque {
                         // Transition from transparent to opaque: recurse for the visible segment
-                        if last_was_opaque == 0 {
-                            if distance < radius as i32 && l_slope > end_slope {
-                                self.scan_octant(
-                                    cx,
-                                    cy,
-                                    radius,
-                                    distance + 1,
-                                    start_slope,
-                                    l_slope,
-                                    xx,
-                                    xy,
-                                    yx,
-                                    yy,
-                                    opaque_board,
-                                );
-                            }
+                        if last_was_opaque == 0 && distance < radius as i32 && l_slope > end_slope {
+                            self.scan_octant(
+                                cx,
+                                cy,
+                                radius,
+                                distance + 1,
+                                start_slope,
+                                l_slope,
+                                xx,
+                                xy,
+                                yx,
+                                yy,
+                                opaque_board,
+                            );
                         }
                         last_was_opaque = 1;
                     } else {
@@ -347,10 +341,13 @@ mod tests {
         }
 
         let vis = TestBoard::mask_visibility(100, 100, 20.0, &opaque);
-        
+
         assert!(vis.get(104, 100)); // 壁の直前は見えている
         assert!(vis.get(105, 100)); // 壁そのものも見えている
-        assert!(!vis.get(106, 100), "Tile (106, 100) should be hidden by wall at (105, 100)"); 
+        assert!(
+            !vis.get(106, 100),
+            "Tile (106, 100) should be hidden by wall at (105, 100)"
+        );
         assert!(vis.get(100, 120)); // 反対側は見えている
     }
 
@@ -368,9 +365,15 @@ mod tests {
         assert!(vis.get(104, 104), "Pillar front should be visible");
         assert!(vis.get(105, 105), "Pillar itself should be visible");
         // 柱の真後ろ (107, 107) やその延長線上のタイルは影になるべき
-        assert!(!vis.get(108, 108), "Tile behind the 2x2 pillar should be hidden");
+        assert!(
+            !vis.get(108, 108),
+            "Tile behind the 2x2 pillar should be hidden"
+        );
         // 柱の横 (108, 105) は視界が通るべき
-        assert!(vis.get(108, 105), "Tile adjacent to the shadow should be visible");
+        assert!(
+            vis.get(108, 105),
+            "Tile adjacent to the shadow should be visible"
+        );
     }
 
     #[test]
@@ -382,11 +385,14 @@ mod tests {
         // 凹型セクター (右方向を中心に 270度 = 上、右、下の範囲。左側が欠ける扇形)
         // このロジックは内部で「全円から左方向の90度凸型セクターを引き算する」パスを通る
         let sector = TestBoard::mask_sector(cx, cy, radius, -135.0, 270.0);
-        
+
         assert!(sector.get(cx + 5, cy), "Right should be included");
         assert!(sector.get(cx, cy - 5), "Top should be included");
         assert!(sector.get(cx, cy + 5), "Bottom should be included");
-        assert!(!sector.get(cx - 5, cy), "Left should be EXCLUDED in this concave sector");
+        assert!(
+            !sector.get(cx - 5, cy),
+            "Left should be EXCLUDED in this concave sector"
+        );
     }
 
     #[test]
@@ -397,7 +403,7 @@ mod tests {
         assert!(vis_tl.get(0, 0));
         assert!(vis_tl.get(5, 5));
         assert!(!vis_tl.get(-1, -1)); // 範囲外は false になること
-        
+
         // マップの右下隅 (255, 255)
         let vis_br = TestBoard::mask_visibility(255, 255, 10.0, &opaque);
         assert!(vis_br.get(255, 255));
@@ -412,7 +418,7 @@ mod tests {
         assert!(mask.get(4, 4));
         assert!(!mask.get(5, 5));
         assert_eq!(mask.count_ones(), 25); // 5x5 visible part
-        
+
         // 完全に外側
         let mask_out = TestBoard::mask_rect(300, 300, 10, 10);
         assert_eq!(mask_out.count_ones(), 0);
@@ -426,7 +432,10 @@ mod tests {
 
         // 360度を超えるスイープは全円になるか
         let full = TestBoard::mask_sector(cx, cy, radius, 0.0, 400.0);
-        assert_eq!(full.count_ones(), TestBoard::mask_sector(cx, cy, radius, 0.0, 360.0).count_ones());
+        assert_eq!(
+            full.count_ones(),
+            TestBoard::mask_sector(cx, cy, radius, 0.0, 360.0).count_ones()
+        );
 
         // 負の開始角度を含むケース
         let neg_start = TestBoard::mask_sector(cx, cy, radius, -20.0, 40.0);

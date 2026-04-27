@@ -1,6 +1,5 @@
-use std::marker::PhantomData;
-use serde::{Serialize, Deserialize, Serializer, Deserializer};
 use crate::layout::{BitLayout, RowMajorLayout};
+use std::marker::PhantomData;
 
 /// ビットマップデータ構造
 /// 型パラメータ W と H でボードサイズを型レベルで固定
@@ -122,11 +121,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// 内部的な初期化用
     #[allow(dead_code)]
-    pub(crate) fn new_with_mask(
-        data: Box<[u64]>,
-        block_mask: Box<[u64]>,
-    ) -> Self {
-        Self { data, block_mask, _layout: PhantomData }
+    pub(crate) fn new_with_mask(data: Box<[u64]>, block_mask: Box<[u64]>) -> Self {
+        Self {
+            data,
+            block_mask,
+            _layout: PhantomData,
+        }
     }
 
     /// 指定インデックスのワードが非空であることを ブロック マスクに反映
@@ -169,8 +169,10 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// 行ごとの余剰ビット（パディング領域）を 0 クリア
     pub(crate) fn clear_padding(&mut self) {
-        if !L::has_padding() { return; }
-        
+        if !L::has_padding() {
+            return;
+        }
+
         let mask = L::padding_mask();
         let row_u64s = W.div_ceil(64);
         for row in 0..H {
@@ -178,7 +180,6 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
             self.data[last] &= mask;
         }
     }
-
 
     /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
     pub(crate) fn idx(x: i32, y: i32) -> Option<(usize, u32)> {
@@ -188,14 +189,26 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 水平方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
     pub fn shift_horizontal_into(&self, dist: i32, dst: &mut Self) {
         dst.clear();
-        L::shift_horizontal(&self.data, &self.block_mask, &mut dst.data, &mut dst.block_mask, dist);
+        L::shift_horizontal(
+            &self.data,
+            &self.block_mask,
+            &mut dst.data,
+            &mut dst.block_mask,
+            dist,
+        );
         dst.clear_padding();
     }
 
     /// 垂直方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
     pub fn shift_vertical_into(&self, dist: i32, dst: &mut Self) {
         dst.clear();
-        L::shift_vertical(&self.data, &self.block_mask, &mut dst.data, &mut dst.block_mask, dist);
+        L::shift_vertical(
+            &self.data,
+            &self.block_mask,
+            &mut dst.data,
+            &mut dst.block_mask,
+            dist,
+        );
         dst.clear_padding();
     }
 
@@ -214,73 +227,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 }
 
-/// ビットボードの操作を抽象化するインターフェース
-pub trait BitBoardInterface: Send + Sync {
-    fn set(&mut self, x: i32, y: i32, value: bool);
-    fn get(&self, x: i32, y: i32) -> bool;
-    fn count_ones(&self) -> usize;
-    fn clear(&mut self);
-}
-
-impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoardInterface for BitBoard<W, H, L> {
-    fn set(&mut self, x: i32, y: i32, value: bool) {
-        self.set(x, y, value);
-    }
-    fn get(&self, x: i32, y: i32) -> bool {
-        self.get(x, y)
-    }
-    fn count_ones(&self) -> usize {
-        self.count_ones()
-    }
-    fn clear(&mut self) {
-        self.clear();
-    }
-}
-
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> Default for BitBoard<W, H, L> {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-impl<const W: usize, const H: usize, L: BitLayout<W, H>> Serialize for BitBoard<W, H, L> {
-    /// BitBoard をシリアライズします。
-    ///
-    /// `block_mask` は `data` から再計算可能な冗長データであるため、
-    /// `data` フィールドのみをシリアライズしてデータサイズを削減します。
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.data.serialize(serializer)
-    }
-}
-
-impl<'de, const W: usize, const H: usize, L: BitLayout<W, H>> Deserialize<'de> for BitBoard<W, H, L> {
-    /// BitBoard をデシリアライズします。
-    ///
-    /// `data` フィールドを復元した後、`rebuild_block_mask` を呼び出して
-    /// `block_mask` を再構築します。
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let data_vec: Vec<u64> = Vec::deserialize(deserializer)?;
-        let expected_len = Self::total_words();
-
-        if data_vec.len() != expected_len {
-            return Err(serde::de::Error::custom(format!(
-                "invalid data length for BitBoard<{}, {}>: got {}, expected {}",
-                W, H, data_vec.len(), expected_len
-            )));
-        }
-
-        let mut board = Self::new_with_mask(
-            data_vec.into_boxed_slice(),
-            vec![0u64; Self::block_words()].into_boxed_slice(),
-        );
-        board.rebuild_block_mask();
-        Ok(board)
     }
 }
 
@@ -411,17 +360,17 @@ mod tests {
         // 疎な状態でセット
         bb.set(10, 10, true);
         bb.set(70, 10, true); // Word 1
-        
+
         let word_idx_10 = TestBoard::idx(10, 10).unwrap().0;
         let word_idx_70 = TestBoard::idx(70, 10).unwrap().0;
-        
+
         assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) != 0);
         assert!(bb.block_mask[word_idx_70 / 64] & (1 << (word_idx_70 % 64)) != 0);
-        
+
         // クリア
         bb.set(10, 10, false);
         assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) == 0);
-        
+
         // 完全にクリアされたか
         bb.clear();
         assert!(bb.block_mask.iter().all(|&w| w == 0));
@@ -432,15 +381,15 @@ mod tests {
         // 幅が64の倍数でないボード
         type PaddingBoard = BitBoard<100, 2>;
         let mut bb = PaddingBoard::default();
-        
+
         // 有効範囲ギリギリ
         bb.set(99, 0, true);
         assert!(bb.get(99, 0));
-        
+
         // パディング領域 (x=100..127) は無視されるか
         bb.set(100, 0, true);
         assert!(!bb.get(100, 0));
-        
+
         // rebuild_block_mask がパディングを無視するか
         bb.finalize();
         assert_eq!(bb.count_ones(), 1);
@@ -450,14 +399,14 @@ mod tests {
     fn test_large_shifts() {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
-        
+
         // 盤面サイズ以上のシフト
         let sh_h = bb.shifted_horizontal(256);
         assert_eq!(sh_h.count_ones(), 0);
-        
+
         let sh_v = bb.shifted_vertical(-300);
         assert_eq!(sh_v.count_ones(), 0);
-        
+
         // ギリギリのシフト
         let sh_edge = bb.shifted_horizontal(155); // 100 + 155 = 255
         assert!(sh_edge.get(255, 100));
@@ -470,12 +419,15 @@ mod tests {
         let x = 10;
         let y = 10;
         let (word_idx, _) = TestBoard::idx(x, y).unwrap();
-        
+
         bb.set(x, y, true);
         assert!(bb.block_mask[word_idx / 64] & (1 << (word_idx % 64)) != 0);
-        
+
         bb.set(x, y, false);
-        assert!(bb.block_mask[word_idx / 64] & (1 << (word_idx % 64)) == 0, "block_mask should be cleared when last bit in word is unset");
+        assert!(
+            bb.block_mask[word_idx / 64] & (1 << (word_idx % 64)) == 0,
+            "block_mask should be cleared when last bit in word is unset"
+        );
         assert_eq!(bb.count_ones(), 0);
     }
 
@@ -483,10 +435,10 @@ mod tests {
     fn test_equality_and_clear() {
         let mut bb1 = TestBoard::new();
         let bb2 = TestBoard::new();
-        
+
         bb1.set(50, 50, true);
         bb1.clear();
-        
+
         assert_eq!(bb1, bb2, "Cleared board should be equal to a new board");
         assert_eq!(bb1.block_mask, bb2.block_mask);
     }

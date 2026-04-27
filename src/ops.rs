@@ -96,17 +96,26 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for BitBoard<W, H, 
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitAnd for BitBoard<W, H, L> {
     type Output = Self;
-    fn bitand(mut self, rhs: Self) -> Self::Output { self &= &rhs; self }
+    fn bitand(mut self, rhs: Self) -> Self::Output {
+        self &= &rhs;
+        self
+    }
 }
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitOr for BitBoard<W, H, L> {
     type Output = Self;
-    fn bitor(mut self, rhs: Self) -> Self::Output { self |= &rhs; self }
+    fn bitor(mut self, rhs: Self) -> Self::Output {
+        self |= &rhs;
+        self
+    }
 }
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitXor for BitBoard<W, H, L> {
     type Output = Self;
-    fn bitxor(mut self, rhs: Self) -> Self::Output { self ^= &rhs; self }
+    fn bitxor(mut self, rhs: Self) -> Self::Output {
+        self ^= &rhs;
+        self
+    }
 }
 
 #[cfg(test)]
@@ -144,15 +153,15 @@ mod tests {
     fn test_ops_identity_cases() {
         let mut a = TestBoard::default();
         a.set(10, 10, true);
-        
+
         // OR with empty
         let or_res = &a | &TestBoard::default();
         assert_eq!(or_res.count_ones(), 1);
-        
+
         // AND with self
         let and_res = &a & &a;
         assert_eq!(and_res.count_ones(), 1);
-        
+
         // XOR with self
         let xor_res = &a ^ &a;
         assert_eq!(xor_res.count_ones(), 0);
@@ -165,10 +174,10 @@ mod tests {
         let mut b = Bb::default();
         a.set(99, 0, true);
         b.set(99, 0, true);
-        
+
         let and_res = &a & &b;
         assert_eq!(and_res.count_ones(), 1);
-        
+
         let not_a = !&a;
         assert_eq!(not_a.count_ones(), 99); // 100 - 1
         assert!(!not_a.get(99, 0));
@@ -189,11 +198,11 @@ mod tests {
         let mut b = TestBoard::default();
         a = !a; // Full
         b.set(10, 10, true);
-        
+
         let and_res = &a & &b;
         assert_eq!(and_res.count_ones(), 1);
         assert!(and_res.get(10, 10));
-        
+
         let xor_res = &a ^ &b;
         assert_eq!(xor_res.count_ones(), (256 * 256) - 1);
         assert!(!xor_res.get(10, 10));

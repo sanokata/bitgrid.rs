@@ -1,7 +1,6 @@
 use crate::{BitBoard, BitLayout};
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
-
     fn apply_morphology_with_buffer<S, Op>(
         &mut self,
         steps: u32,
@@ -15,22 +14,24 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         let mut current_range = 0;
         while current_range < steps {
             let d = (steps - current_range).min(current_range + 1);
-            
+
             // 正方向
             shift_into(self, d as i32, buffer);
             op(self, buffer);
-            
+
             // 負方向
             shift_into(self, -(d as i32), buffer);
             op(self, buffer);
-            
+
             current_range += d;
         }
     }
 
     /// セットされたビットを全方向（8方向）に膨張させる (アロケート回避版)
     pub fn dilate_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
-        if steps == 0 { return; }
+        if steps == 0 {
+            return;
+        }
 
         self.apply_morphology_with_buffer(
             steps,
@@ -51,7 +52,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// セットされたビットを全方向（8方向）に膨張させる
     pub fn dilate(&self, steps: u32) -> Self {
-        if steps == 0 { return self.clone(); }
+        if steps == 0 {
+            return self.clone();
+        }
         let mut res = self.clone();
         let mut buffer = Self::new();
         res.dilate_with_buffer(steps, &mut buffer);
@@ -60,7 +63,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// セットされたビットを全方向（8方向）に収縮させる (アロケート回避版)
     pub fn erode_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
-        if steps == 0 { return; }
+        if steps == 0 {
+            return;
+        }
 
         self.apply_morphology_with_buffer(
             steps,
@@ -81,7 +86,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// セットされたビットを全方向（8方向）に収縮させる
     pub fn erode(&self, steps: u32) -> Self {
-        if steps == 0 { return self.clone(); }
+        if steps == 0 {
+            return self.clone();
+        }
         let mut res = self.clone();
         let mut buffer = Self::new();
         res.erode_with_buffer(steps, &mut buffer);
@@ -99,7 +106,7 @@ mod tests {
     fn test_morphology_dilate() {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
-        
+
         // 1ステップ膨張
         let d1 = bb.dilate(1);
         assert_eq!(d1.count_ones(), 9); // 3x3
@@ -140,28 +147,28 @@ mod tests {
     fn test_shifted_horizontal_edge_cases() {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
-        
+
         let sh_l = bb.shifted_horizontal(-1); // 東から西へ (x-)
-        assert!(!sh_l.get(0, 0)); 
+        assert!(!sh_l.get(0, 0));
         assert_eq!(sh_l.count_ones(), 0); // 画面外へ
-        
+
         let sh_r = bb.shifted_horizontal(255); // 西から東へ (x+)
         assert!(sh_r.get(255, 0));
-        
+
         let sh_r_out = bb.shifted_horizontal(256); // 画面外へ
         assert_eq!(sh_r_out.count_ones(), 0);
     }
-    
+
     #[test]
     fn test_morphology_at_boundaries() {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
-        
+
         let d1 = bb.dilate(1);
         assert_eq!(d1.count_ones(), 4); // (0,0), (1,0), (0,1), (1,1)
         assert!(d1.get(1, 1));
         assert!(!d1.get(2, 2));
-        
+
         bb.clear();
         bb.set(255, 255, true);
         let d2 = bb.dilate(1);
@@ -178,10 +185,10 @@ mod tests {
                 bb.set(x, y, true);
             }
         }
-        
+
         // 2ステップ膨張して2ステップ収縮
         let cycle = bb.dilate(2).erode(2);
-        
+
         // 元の形状に戻るはず（単純な矩形の場合）
         assert_eq!(cycle.count_ones(), 25);
         assert!(cycle.get(100, 100));
