@@ -1,5 +1,13 @@
 use crate::{BitBoard, BitLayout};
 
+/// レイの方向ベクトルを「水平」とみなすときの判定 ε。
+/// vy の絶対値がこの値未満なら「ほぼ水平」として全範囲または無効範囲に分岐する。
+const RAY_DIRECTION_EPSILON: f32 = 1e-6;
+
+/// シャドウキャスティングで参照するセル境界スロープのオフセット。
+/// セルの中心を 0、左右端を ±0.5 とした場合の境界傾斜。
+const CELL_SLOPE_OFFSET: f32 = 0.5;
+
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 指定した矩形範囲のみを 1 にしたマスクを作成
     /// 範囲情報の高速な抽出・制限に使用
@@ -117,13 +125,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// 特定のレイ（方向ベクトル vx, vy）による x の境界範囲を計算
     fn get_ray_x_limit(dy: f32, vx: f32, vy: f32, is_start: bool) -> (f32, f32) {
-        let eps = 1e-6;
-        if vy.abs() < eps {
+        if vy.abs() < RAY_DIRECTION_EPSILON {
             // 水平レイ: dy の正負とベクトルの向きで全範囲か無効範囲かが決まる
             let ok = if is_start {
-                vx * dy >= -eps
+                vx * dy >= -RAY_DIRECTION_EPSILON
             } else {
-                vx * dy <= eps
+                vx * dy <= RAY_DIRECTION_EPSILON
             };
             if ok {
                 (f32::NEG_INFINITY, f32::INFINITY)
@@ -131,19 +138,22 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                 (f32::INFINITY, f32::NEG_INFINITY)
             }
         } else {
-            let x_limit = (vx * dy + if is_start { eps } else { -eps }) / vy;
+            let bias = if is_start {
+                RAY_DIRECTION_EPSILON
+            } else {
+                -RAY_DIRECTION_EPSILON
+            };
+            let x_limit = (vx * dy + bias) / vy;
             if vy > 0.0 {
                 if is_start {
                     (f32::NEG_INFINITY, x_limit)
                 } else {
                     (x_limit, f32::INFINITY)
                 }
+            } else if is_start {
+                (x_limit, f32::INFINITY)
             } else {
-                if is_start {
-                    (x_limit, f32::INFINITY)
-                } else {
-                    (f32::NEG_INFINITY, x_limit)
-                }
+                (f32::NEG_INFINITY, x_limit)
             }
         }
     }
@@ -193,6 +203,11 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     /// 再帰的シャドウキャスティングの走査コアロジック。
     /// `octant` で 8 方向の基底ベクトルを抽象化し、引数を集約する。
+    ///
+    /// アルゴリズムは Berg/Mejaski 式の Recursive Shadowcasting:
+    /// - 距離 `distance` の行を 1 列ずつ走査し、各セルの左右端傾斜と
+    ///   現在の楔（start_slope / end_slope）を比較して可視判定を行う
+    /// - 不透明セルにぶつかったら以降の楔を縮め、視認可能な区間ごとに再帰
     fn scan_octant(
         &mut self,
         cx: i32,
@@ -225,9 +240,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                     continue;
                 }
 
-                // 当該セルの左右端の傾斜（start_slope/end_slope は楔の左右境界）
-                let l_slope = (i as f32 + 0.5) / (distance as f32 - 0.5);
-                let r_slope = (i as f32 - 0.5) / (distance as f32 + 0.5);
+                // 当該セルの左右端の傾斜（start_slope/end_slope は楔の左右境界）。
+                // セル中心 ± CELL_SLOPE_OFFSET を取って左右端の傾斜を計算する。
+                let l_slope =
+                    (i as f32 + CELL_SLOPE_OFFSET) / (distance as f32 - CELL_SLOPE_OFFSET);
+                let r_slope =
+                    (i as f32 - CELL_SLOPE_OFFSET) / (distance as f32 + CELL_SLOPE_OFFSET);
 
                 if start_slope < r_slope {
                     continue;

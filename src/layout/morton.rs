@@ -4,25 +4,45 @@ use super::BitLayout;
 #[derive(Default, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MortonLayout;
 
+// ─── ビット展開用のマスク群 ─────────────────────────────────────────
+// `interleave` は 16 ビット値を 32 ビット幅に展開し、各ビット間に 0 を挿入する。
+// 段階的に「ペア化されたビット群」を倍々の距離に広げていくため、それぞれの段階で
+// 隣接する偶数本／奇数本のビットだけを残すマスクを使う:
+// - INTERLEAVE_MASK_8 : 0x00FF_00FF — 8 ビットごと連続を許す
+// - INTERLEAVE_MASK_4 : 0x0F0F_0F0F — 4 ビットごと連続を許す
+// - INTERLEAVE_MASK_2 : 0x3333_3333 — 2 ビットごと連続を許す
+// - INTERLEAVE_MASK_1 : 0x5555_5555 — 1 ビットごとに偶数位置のみ
+const INTERLEAVE_MASK_8: u32 = 0x00FF_00FF;
+const INTERLEAVE_MASK_4: u32 = 0x0F0F_0F0F;
+const INTERLEAVE_MASK_2: u32 = 0x3333_3333;
+const INTERLEAVE_MASK_1: u32 = 0x5555_5555;
+/// `deinterleave` の最終段で使う「下位 16 ビットだけ残す」マスク。
+const DEINTERLEAVE_FINAL_MASK: u32 = 0x0000_FFFF;
+
 impl MortonLayout {
+    /// 16 ビット値を 32 ビット幅に展開し、各ビット間に 0 を 1 ビットずつ挿入する。
+    /// 段階的に間隔を倍にしていく古典的な bit-spreading 実装。
     const fn interleave(mut x: u32) -> u32 {
-        x = (x | (x << 8)) & 0x00FF00FF;
-        x = (x | (x << 4)) & 0x0F0F0F0F;
-        x = (x | (x << 2)) & 0x33333333;
-        x = (x | (x << 1)) & 0x55555555;
+        x = (x | (x << 8)) & INTERLEAVE_MASK_8;
+        x = (x | (x << 4)) & INTERLEAVE_MASK_4;
+        x = (x | (x << 2)) & INTERLEAVE_MASK_2;
+        x = (x | (x << 1)) & INTERLEAVE_MASK_1;
         x
     }
 
+    /// `interleave` の逆操作。挿入されたゼロを取り除いて 32 → 16 ビットに圧縮する。
     const fn deinterleave(mut x: u32) -> u32 {
-        x &= 0x55555555;
-        x = (x | (x >> 1)) & 0x33333333;
-        x = (x | (x >> 2)) & 0x0F0F0F0F;
-        x = (x | (x >> 4)) & 0x00FF00FF;
-        x = (x | (x >> 8)) & 0x0000FFFF;
+        x &= INTERLEAVE_MASK_1;
+        x = (x | (x >> 1)) & INTERLEAVE_MASK_2;
+        x = (x | (x >> 2)) & INTERLEAVE_MASK_4;
+        x = (x | (x >> 4)) & INTERLEAVE_MASK_8;
+        x = (x | (x >> 8)) & DEINTERLEAVE_FINAL_MASK;
         x
     }
 
+    /// (x, y) を Morton コードへ変換: x ビットを偶数位置、y ビットを奇数位置に配置する。
     pub const fn encode(x: u32, y: u32) -> usize {
+        // y を 1 ビット左シフトして奇数位置に置き、x（偶数位置）と OR で合成
         (Self::interleave(x) as usize) | ((Self::interleave(y) as usize) << 1)
     }
 

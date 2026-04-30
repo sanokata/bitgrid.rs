@@ -58,6 +58,18 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
         (1u64 << (W % 64)) - 1
     }
 
+    /// 水平方向（X 軸）にビットボードをシフトする。
+    ///
+    /// 各行は `row_u64s` 個の u64 ワードに分かれており、行をまたいだ波及は無い。
+    /// 行内では 2 種類の経路に分かれる:
+    /// - `bit_offset == 0`: 64 ビット境界そのものを跨ぐシフトなので、単純な
+    ///   ワード `copy_from_slice` で完了する。
+    /// - `bit_offset != 0`: ワード境界をまたぐビット位置にずれるため、
+    ///   隣接ワードへ「あふれた」ビットをキャリーとして次のワードに OR する。
+    ///   - 正方向シフト (dist > 0): 低位 → 高位の順に走査し、`val << bit_offset`
+    ///     の上位 `inv_bit_offset` ビットを次ワードへキャリー
+    ///   - 負方向シフト (dist < 0): 高位 → 低位の順に走査し、`val >> bit_offset`
+    ///     の下位 `inv_bit_offset` ビットを前ワードへキャリー
     fn shift_horizontal(
         src: &[u64],
         block: &[u64],
@@ -73,6 +85,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
 
         let abs_dist = dist.unsigned_abs() as usize;
         if abs_dist >= W {
+            // ボード幅以上のシフトは全消去
             dst.fill(0);
             dst_block.fill(0);
             return;
@@ -82,6 +95,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
         let word_offset = abs_dist / 64;
         let bit_offset = (abs_dist % 64) as u32;
 
+        // ─ ワード境界に揃ったシフト: 各行内の連続コピーのみで完了 ─
         if bit_offset == 0 {
             for y in 0..H {
                 let row_base = y * row_u64s;
@@ -89,19 +103,21 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
                 let dst_row = &mut dst[row_base..row_base + row_u64s];
                 if dist > 0 {
                     if word_offset < row_u64s {
-                        dst_row[word_offset..].copy_from_slice(&src_row[..row_u64s - word_offset]);
+                        dst_row[word_offset..]
+                            .copy_from_slice(&src_row[..row_u64s - word_offset]);
                     }
-                } else {
-                    if word_offset < row_u64s {
-                        dst_row[..row_u64s - word_offset].copy_from_slice(&src_row[word_offset..]);
-                    }
+                } else if word_offset < row_u64s {
+                    dst_row[..row_u64s - word_offset]
+                        .copy_from_slice(&src_row[word_offset..]);
                 }
             }
         } else {
+            // ─ ワード境界をまたぐシフト: 隣接ワードへキャリーを伝播 ─
             let inv_bit_offset = 64 - bit_offset;
             for y in 0..H {
                 let row_base = y * row_u64s;
                 if dist > 0 {
+                    // 正方向: 低位ワードから走査し、上位 inv_bit_offset ビットを次へ持ち越す
                     let mut carry = 0;
                     for i in 0..row_u64s {
                         let idx = row_base + i;
@@ -113,6 +129,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
                         }
                     }
                 } else {
+                    // 負方向: 高位ワードから逆走査し、下位 inv_bit_offset ビットを前へ持ち越す
                     let mut carry = 0;
                     for i in (0..row_u64s).rev() {
                         let idx = row_base + i;
@@ -128,6 +145,9 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for RowMajorLayout {
                 }
             }
         }
+
+        // dst の block_mask を再構築（呼び出し側で clear_padding を行うため、
+        // ここではパディング由来の偽陽性を許容する）
         for i in 0..dst.len() {
             if dst[i] != 0 {
                 dst_block[i / 64] |= 1 << (i % 64);
