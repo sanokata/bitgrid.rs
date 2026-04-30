@@ -5,13 +5,26 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// 垂直・水平方向に (size - 1) 回のビットシフト AND を指数的に行い、全タイルの空きを確認
     pub fn fit_rect_anchor(&self, width: u32, height: u32) -> Self {
         let mut res = self.clone();
+        let mut scratch = Self::new();
+        res.fit_rect_anchor_with_buffer(width, height, &mut scratch);
+        res
+    }
 
+    /// `fit_rect_anchor` の in-place / アロケーションフリー版。
+    /// `self` に縮小結果を上書きし、`scratch` をシフト先のバッファとして再利用する。
+    /// O(log(max(width, height))) 回呼ばれる shifted_* に伴う allocation を排除する。
+    pub fn fit_rect_anchor_with_buffer(
+        &mut self,
+        width: u32,
+        height: u32,
+        scratch: &mut Self,
+    ) {
         // 垂直方向の縮小
         let mut current_h = 1;
         while current_h < height {
             let d = (height - current_h).min(current_h);
-            let shifted = res.shifted_vertical(-(d as i32));
-            res &= &shifted;
+            self.shift_vertical_into(-(d as i32), scratch);
+            *self &= &*scratch;
             current_h += d;
         }
 
@@ -19,13 +32,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         let mut current_w = 1;
         while current_w < width {
             let d = (width - current_w).min(current_w);
-            let shifted = res.shifted_horizontal(-(d as i32));
-            res &= &shifted;
+            self.shift_horizontal_into(-(d as i32), scratch);
+            *self &= &*scratch;
             current_w += d;
         }
 
-        res.finalize();
-        res
+        self.finalize();
     }
 
     /// BFS ウェーブフロントを 1 ステップ展開
