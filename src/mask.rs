@@ -168,32 +168,31 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         radius: f32,
         opaque_board: &BitBoard<W, H, L>,
     ) {
-        self.clear(); // 既存の内容をクリア
+        self.clear();
         self.set(cx, cy, true); // 立っている位置は必ず見える
 
-        // 8つのオクタントに対して走査を行う
-        // 方向ベクトル組: (xx, xy, yx, yy)
-        let directions = [
-            (1, 0, 0, -1),
-            (0, 1, -1, 0),
-            (0, 1, 1, 0),
-            (-1, 0, 0, 1),
-            (-1, 0, 0, -1),
-            (0, -1, -1, 0),
-            (0, -1, 1, 0),
-            (1, 0, 0, 1),
+        // 8 オクタントの基底ベクトル (xx, xy, yx, yy)
+        const OCTANTS: [Octant; 8] = [
+            Octant { xx: 1, xy: 0, yx: 0, yy: -1 },
+            Octant { xx: 0, xy: 1, yx: -1, yy: 0 },
+            Octant { xx: 0, xy: 1, yx: 1, yy: 0 },
+            Octant { xx: -1, xy: 0, yx: 0, yy: 1 },
+            Octant { xx: -1, xy: 0, yx: 0, yy: -1 },
+            Octant { xx: 0, xy: -1, yx: -1, yy: 0 },
+            Octant { xx: 0, xy: -1, yx: 1, yy: 0 },
+            Octant { xx: 1, xy: 0, yx: 0, yy: 1 },
         ];
 
-        for (xx, xy, yx, yy) in directions {
-            self.scan_octant(cx, cy, radius, 1, 1.0, 0.0, xx, xy, yx, yy, opaque_board);
+        for octant in OCTANTS {
+            self.scan_octant(cx, cy, radius, 1, 1.0, 0.0, octant, opaque_board);
         }
 
         // 階層化マスクを更新（走査中に set を呼んでいるため）
         self.rebuild_block_mask();
     }
 
-    /// 再帰的シャドウキャスティングの走査コアロジック
-    #[allow(clippy::too_many_arguments)]
+    /// 再帰的シャドウキャスティングの走査コアロジック。
+    /// `octant` で 8 方向の基底ベクトルを抽象化し、引数を集約する。
     fn scan_octant(
         &mut self,
         cx: i32,
@@ -202,10 +201,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         row: i32,
         mut start_slope: f32,
         end_slope: f32,
-        xx: i32,
-        xy: i32,
-        yx: i32,
-        yy: i32,
+        octant: Octant,
         opaque_board: &BitBoard<W, H, L>,
     ) {
         if start_slope < end_slope {
@@ -215,20 +211,21 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         let radius_sq = radius * radius;
 
         for distance in row..=(radius.ceil() as i32) {
-            let mut last_was_opaque = -1; // -1: initial, 0: trans, 1: opaque
+            // セルの直前状態: None=初期 / Some(true)=不透明 / Some(false)=透明
+            let mut last_was_opaque: Option<bool> = None;
 
             for i in (0..=distance).rev() {
-                // 事前に計算されたベクトルによる高速な座標変換
-                let dx = distance * xx + i * xy;
-                let dy = distance * yx + i * yy;
+                let dx = distance * octant.xx + i * octant.xy;
+                let dy = distance * octant.yx + i * octant.yy;
                 let x = cx + dx;
                 let y = cy + dy;
 
-                // マップ範囲外チェック（高速化のためここで行う）
+                // マップ範囲外は走査をスキップ（高速化のため早期に判定）
                 if x < 0 || x >= W as i32 || y < 0 || y >= H as i32 {
                     continue;
                 }
 
+                // 当該セルの左右端の傾斜（start_slope/end_slope は楔の左右境界）
                 let l_slope = (i as f32 + 0.5) / (distance as f32 - 0.5);
                 let r_slope = (i as f32 - 0.5) / (distance as f32 + 0.5);
 
@@ -239,50 +236,57 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                     break;
                 }
 
-                // 距離チェック
                 if (dx * dx + dy * dy) as f32 <= radius_sq {
                     self.set(x, y, true);
                 }
 
                 let is_opaque = opaque_board.get(x, y);
-
-                if last_was_opaque == 1 {
-                    if !is_opaque {
-                        // Transition from opaque to transparent: shrink the wedge
-                        last_was_opaque = 0;
+                match last_was_opaque {
+                    Some(true) if !is_opaque => {
+                        // 不透明 → 透明: 楔の左境界を更新して継続
                         start_slope = l_slope;
+                        last_was_opaque = Some(false);
                     }
-                } else {
-                    if is_opaque {
-                        // Transition from transparent to opaque: recurse for the visible segment
-                        if last_was_opaque == 0 && distance < radius as i32 && l_slope > end_slope {
-                            self.scan_octant(
-                                cx,
-                                cy,
-                                radius,
-                                distance + 1,
-                                start_slope,
-                                l_slope,
-                                xx,
-                                xy,
-                                yx,
-                                yy,
-                                opaque_board,
-                            );
-                        }
-                        last_was_opaque = 1;
-                    } else {
-                        last_was_opaque = 0;
+                    Some(false) if is_opaque
+                        && distance < radius as i32
+                        && l_slope > end_slope =>
+                    {
+                        // 透明 → 不透明: 見えている区間で再帰し、不透明をマーク
+                        self.scan_octant(
+                            cx,
+                            cy,
+                            radius,
+                            distance + 1,
+                            start_slope,
+                            l_slope,
+                            octant,
+                            opaque_board,
+                        );
+                        last_was_opaque = Some(true);
+                    }
+                    _ => {
+                        last_was_opaque = Some(is_opaque);
                     }
                 }
             }
 
-            // If the row ends with an opaque tile, the wedge is fully blocked for further distances
-            if last_was_opaque == 1 {
+            // 行末が不透明で終わった場合、これ以上遠い距離は楔全体が遮蔽される
+            if last_was_opaque == Some(true) {
                 break;
             }
         }
     }
+}
+
+/// シャドウキャスティングの 8 オクタントを示す基底変換。
+/// (dx, dy) = (distance * xx + i * xy, distance * yx + i * yy) の形で
+/// オクタントごとの座標変換を表現する。
+#[derive(Debug, Clone, Copy)]
+struct Octant {
+    xx: i32,
+    xy: i32,
+    yx: i32,
+    yy: i32,
 }
 
 #[cfg(test)]
