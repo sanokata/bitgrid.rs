@@ -13,10 +13,11 @@ impl<'a, const W: usize, const H: usize, L: BitLayout<W, H>> Iterator
     type Item = (i32, i32);
 
     fn next(&mut self) -> Option<Self::Item> {
+        let total = BitBoard::<W, H, L>::total_words();
         loop {
             while self.current_word == 0 {
                 self.word_idx += 1;
-                if self.word_idx >= BitBoard::<W, H, L>::total_words() {
+                if self.word_idx >= total {
                     return None;
                 }
 
@@ -26,16 +27,18 @@ impl<'a, const W: usize, const H: usize, L: BitLayout<W, H>> Iterator
                 let block_segment = self.bitmap.block_mask[block_word_idx] >> bit_in_block;
 
                 if block_segment == 0 {
-                    // このブロックワードに含まれる残りの 64 ワードはすべて空。次のブロック境界までジャンプ
-                    self.word_idx = (block_word_idx + 1) * 64 - 1; // loop冒頭で+1されるため-1
+                    // 本ブロックワードに含まれる残りの 64 ワードはすべて空。
+                    // ループ先頭の `+= 1` で次のブロック先頭に到達するよう、
+                    // ブロック末尾のインデックスをセットする。
+                    let next_block_start = (block_word_idx + 1) * 64;
+                    self.word_idx = next_block_start - 1;
                     continue;
-                } else {
-                    // 次にビットが立っているワードを特定
-                    let skip = block_segment.trailing_zeros() as usize;
-                    self.word_idx += skip;
-
-                    self.current_word = self.bitmap.data[self.word_idx];
                 }
+
+                // 次にビットが立っているワードを特定
+                let skip = block_segment.trailing_zeros() as usize;
+                self.word_idx += skip;
+                self.current_word = self.bitmap.data[self.word_idx];
             }
 
             let bit = self.current_word.trailing_zeros();
