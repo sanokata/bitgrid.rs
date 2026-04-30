@@ -211,4 +211,63 @@ mod tests {
         let e1 = bb.erode(1);
         assert!(e1.is_empty());
     }
+
+    // ─── エッジケースのテスト ───────────────────────────────────────
+
+    #[test]
+    fn test_shifted_horizontal_zero_is_identity() {
+        let mut bb = TestBoard::default();
+        bb.set(10, 5, true);
+        bb.set(70, 100, true);
+        let sh = bb.shifted_horizontal(0);
+        assert_eq!(sh, bb, "0 シフトは恒等変換");
+    }
+
+    #[test]
+    fn test_shifted_vertical_zero_is_identity() {
+        let mut bb = TestBoard::default();
+        bb.set(10, 5, true);
+        bb.set(70, 100, true);
+        let sv = bb.shifted_vertical(0);
+        assert_eq!(sv, bb, "0 シフトは恒等変換");
+    }
+
+    #[test]
+    fn test_shifted_extreme_values_do_not_panic() {
+        let mut bb = TestBoard::default();
+        bb.set(100, 100, true);
+
+        // 巨大な正シフト → 全消去
+        let sh_max = bb.shifted_horizontal(i32::MAX);
+        assert!(sh_max.is_empty());
+        let sh_min = bb.shifted_horizontal(i32::MIN + 1);
+        assert!(sh_min.is_empty());
+
+        // 巨大な負シフト → 全消去
+        let sv_big = bb.shifted_vertical(10_000);
+        assert!(sv_big.is_empty());
+    }
+
+    #[test]
+    fn test_dilate_huge_steps_fills_board() {
+        let mut bb = TestBoard::default();
+        bb.set(128, 128, true);
+        // 256 ステップ膨張させればボード全体が埋まる
+        let d = bb.dilate(256);
+        assert_eq!(d.count_ones(), 256 * 256);
+    }
+
+    #[test]
+    fn test_erode_huge_steps_clears_board() {
+        let mut bb = TestBoard::default();
+        // 5x5 のブロック
+        for y in 100..105 {
+            for x in 100..105 {
+                bb.set(x, y, true);
+            }
+        }
+        // ブロックサイズ以上の収縮で全消去
+        let e = bb.erode(10);
+        assert!(e.is_empty());
+    }
 }

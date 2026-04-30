@@ -479,4 +479,85 @@ mod tests {
         assert!(vis.get(100, 105)); // 壁自体
         assert!(!vis.get(100, 106)); // 壁の向こう
     }
+
+    // ─── エッジケースのテスト ───────────────────────────────────────
+
+    #[test]
+    fn test_mask_visibility_zero_radius() {
+        let opaque = TestBoard::default();
+        let vis = TestBoard::mask_visibility(100, 100, 0.0, &opaque);
+        // radius=0 でも自分自身のタイルだけは見える
+        assert!(vis.get(100, 100));
+        assert!(!vis.get(101, 100));
+        assert!(!vis.get(100, 101));
+    }
+
+    #[test]
+    fn test_mask_visibility_completely_enclosed() {
+        let mut opaque = TestBoard::default();
+        // 周囲 8 方向を全て壁で囲む（中央が完全密室）
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                if dx != 0 || dy != 0 {
+                    opaque.set(100 + dx, 100 + dy, true);
+                }
+            }
+        }
+        let vis = TestBoard::mask_visibility(100, 100, 20.0, &opaque);
+        // 自分と隣接 8 タイル（壁含む）は見える
+        assert!(vis.get(100, 100));
+        assert!(vis.get(101, 101));
+        // 2 マス離れたタイルは壁で遮蔽されて見えない
+        assert!(!vis.get(102, 102));
+        assert!(!vis.get(102, 100));
+        assert!(!vis.get(100, 102));
+    }
+
+    #[test]
+    fn test_mask_sector_zero_sweep_does_not_panic() {
+        // sweep=0 は退化形。具体的なセマンティクスは実装依存だが、
+        // パニックせず、有限なビット数を返すことだけを保証する
+        let m = TestBoard::mask_sector(100, 100, 10.0, 0.0, 0.0);
+        // 円の上限（21*21 = 441）を超えないこと
+        assert!(m.count_ones() <= 21 * 21);
+    }
+
+    #[test]
+    fn test_mask_sector_full_circle_via_720() {
+        let r = 10.0;
+        let circle_360 = TestBoard::mask_sector(100, 100, r, 0.0, 360.0);
+        let circle_720 = TestBoard::mask_sector(100, 100, r, 0.0, 720.0);
+        assert_eq!(
+            circle_360.count_ones(),
+            circle_720.count_ones(),
+            "720 度スイープは 360 度と同じ全円になるべき"
+        );
+    }
+
+    #[test]
+    fn test_mask_sector_zero_radius_is_empty() {
+        let m = TestBoard::mask_sector(100, 100, 0.0, 0.0, 360.0);
+        assert_eq!(m.count_ones(), 0, "radius=0 は空マスク");
+    }
+
+    #[test]
+    fn test_mask_visibility_center_in_wall() {
+        let mut opaque = TestBoard::default();
+        opaque.set(100, 100, true); // 中心が壁
+        let vis = TestBoard::mask_visibility(100, 100, 5.0, &opaque);
+        // 中心（プレイヤー位置）は常に見える
+        assert!(vis.get(100, 100));
+        // 周囲は通常通り見える
+        assert!(vis.get(102, 100));
+    }
+
+    #[test]
+    fn test_mask_rect_zero_dimensions() {
+        // 幅 0 / 高さ 0 の矩形は空のマスクのはず
+        let m_zero_w = TestBoard::mask_rect(10, 10, 0, 5);
+        assert_eq!(m_zero_w.count_ones(), 0);
+
+        let m_zero_h = TestBoard::mask_rect(10, 10, 5, 0);
+        assert_eq!(m_zero_h.count_ones(), 0);
+    }
 }

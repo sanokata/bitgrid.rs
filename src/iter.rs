@@ -140,4 +140,48 @@ mod tests {
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0], (100, 100));
     }
+
+    // ─── エッジケースのテスト ───────────────────────────────────────
+
+    #[test]
+    fn test_iter_set_bits_empty_board_returns_none() {
+        let bb = TestBoard::default();
+        let mut iter = bb.iter_set_bits();
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn test_iter_set_bits_full_board_visits_all_unique() {
+        type SmallBoard = BitBoard<32, 32>;
+        let mut bb = SmallBoard::default();
+        bb = !bb;
+        let coords: Vec<_> = bb.iter_set_bits().collect();
+        assert_eq!(coords.len(), 32 * 32);
+        // 全ての座標が一意に列挙されること
+        use std::collections::HashSet;
+        let set: HashSet<_> = coords.iter().copied().collect();
+        assert_eq!(set.len(), coords.len());
+    }
+
+    #[test]
+    fn test_iter_set_bits_word_boundary_continuity() {
+        let mut bb = TestBoard::default();
+        // word 境界を跨ぐ連続位置を立てる
+        bb.set(63, 0, true);
+        bb.set(64, 0, true);
+        let coords: Vec<_> = bb.iter_set_bits().collect();
+        assert!(coords.contains(&(63, 0)));
+        assert!(coords.contains(&(64, 0)));
+        assert_eq!(coords.len(), 2);
+    }
+
+    #[test]
+    fn test_iter_set_bits_after_clear_returns_none() {
+        let mut bb = TestBoard::default();
+        bb.set(10, 10, true);
+        bb.set(50, 50, true);
+        bb.clear();
+        let mut iter = bb.iter_set_bits();
+        assert_eq!(iter.next(), None);
+    }
 }

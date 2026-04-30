@@ -246,4 +246,78 @@ mod tests {
         assert_eq!(xor_res.count_ones(), (256 * 256) - 1);
         assert!(!xor_res.get(10, 10));
     }
+
+    // ─── エッジケースのテスト ───────────────────────────────────────
+
+    #[test]
+    fn test_not_ref_and_owned_match() {
+        let mut a = TestBoard::default();
+        a.set(0, 0, true);
+        a.set(63, 0, true);
+        a.set(64, 0, true);
+        a.set(255, 255, true);
+
+        let by_ref = !&a;
+        let by_owned = !a.clone();
+        assert_eq!(by_ref, by_owned, "&BitBoard と所有版の NOT は一致するべき");
+    }
+
+    #[test]
+    fn test_not_with_padding_does_not_leak() {
+        // W が 64 の倍数でないボードでパディングが反転で漏れないこと
+        type Bb = BitBoard<100, 4>;
+        let bb = Bb::default();
+        let inverted = !bb;
+        // 全部 1 のはずだが、padding ビットは 0 のまま
+        assert_eq!(inverted.count_ones(), 100 * 4);
+        // 範囲外座標へのアクセスは false（パディング由来でないことを確認）
+        for (x, _y) in inverted.iter_set_bits() {
+            assert!(x < 100, "パディング由来のビットが漏れている: x={x}");
+        }
+    }
+
+    #[test]
+    fn test_and_result_block_mask_consistency() {
+        // disjoint な集合での AND は空、block_mask も完全に 0 でなければならない
+        let mut a = TestBoard::default();
+        let mut b = TestBoard::default();
+        a.set(10, 10, true);
+        b.set(20, 20, true);
+        let r = &a & &b;
+        assert_eq!(r.count_ones(), 0);
+        assert!(r.is_empty(), "block_mask を含めて空であること");
+    }
+
+    #[test]
+    fn test_layout_consistency_morton_vs_row_major() {
+        use crate::layout::{MortonLayout, RowMajorLayout};
+
+        type Morton = BitBoard<128, 128, MortonLayout>;
+        type RowMajor = BitBoard<128, 128, RowMajorLayout>;
+
+        // 同じ座標を立てたとき、論理的には同じ集合になるはず
+        let coords = [(0, 0), (63, 0), (64, 0), (100, 100), (127, 127)];
+
+        let mut m = Morton::default();
+        let mut r = RowMajor::default();
+        for &(x, y) in &coords {
+            m.set(x, y, true);
+            r.set(x, y, true);
+        }
+
+        // count_ones は一致
+        assert_eq!(m.count_ones(), r.count_ones());
+
+        // 各座標で get の結果が一致
+        for &(x, y) in &coords {
+            assert!(m.get(x, y));
+            assert!(r.get(x, y));
+        }
+
+        // iter_set_bits の集合が一致
+        use std::collections::HashSet;
+        let m_set: HashSet<_> = m.iter_set_bits().collect();
+        let r_set: HashSet<_> = r.iter_set_bits().collect();
+        assert_eq!(m_set, r_set);
+    }
 }

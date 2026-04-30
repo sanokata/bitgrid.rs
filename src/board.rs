@@ -48,12 +48,6 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         Self::total_words().div_ceil(64)
     }
 
-    /// 行末パディング用のマスク
-    #[allow(dead_code)]
-    pub(crate) fn padding_mask() -> u64 {
-        L::padding_mask()
-    }
-
     /// ワールド座標からタイル座標への公式な変換 (床関数を使用)
     pub fn pos_to_tile(x: f32, y: f32) -> (i32, i32) {
         (x.floor() as i32, y.floor() as i32)
@@ -97,17 +91,20 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     // --- Basic Access & Mutation ---
 
     /// 指定座標のビットを取得
+    #[inline]
     pub fn get(&self, x: i32, y: i32) -> bool {
         Self::idx(x, y).is_some_and(|(word, bit)| (self.data[word] >> bit) & 1 != 0)
     }
 
     /// フラットインデックス形式でビットを取得
+    #[inline]
     pub fn get_by_index(&self, idx: usize) -> bool {
         let (x, y) = Self::index_to_tile(idx);
         self.get(x, y)
     }
 
     /// 指定座標のビットを設定
+    #[inline]
     pub fn set(&mut self, x: i32, y: i32, value: bool) {
         if let Some((word, bit)) = Self::idx(x, y) {
             if value {
@@ -199,6 +196,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 
     /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
+    #[inline]
     pub(crate) fn idx(x: i32, y: i32) -> Option<(usize, u32)> {
         L::coord_to_word_bit(x, y)
     }

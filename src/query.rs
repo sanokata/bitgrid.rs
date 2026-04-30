@@ -2,11 +2,13 @@ use crate::{BitBoard, BitLayout};
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// ボード上に一つでもオン（1）のビットがあるか確認
+    #[inline]
     pub fn has_any(&self) -> bool {
         self.block_mask.iter().any(|&w| w != 0)
     }
 
     /// ボードが完全に空であるか確認
+    #[inline]
     pub fn is_empty(&self) -> bool {
         !self.has_any()
     }
