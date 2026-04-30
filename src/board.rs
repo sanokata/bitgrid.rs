@@ -4,12 +4,29 @@ use std::marker::PhantomData;
 /// ビットマップデータ構造
 /// 型パラメータ W と H でボードサイズを型レベルで固定
 /// L でメモリレイアウトを指定 (デフォルトは行アライメント)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BitBoard<const W: usize, const H: usize, L: BitLayout<W, H> = RowMajorLayout> {
     pub(crate) data: Box<[u64]>,
     /// 階層化マスク (Level 1): 各ビットは data[i] が 0 でないかを表す
     pub(crate) block_mask: Box<[u64]>,
     _layout: PhantomData<L>,
+}
+
+impl<const W: usize, const H: usize, L: BitLayout<W, H>> Clone for BitBoard<W, H, L> {
+    fn clone(&self) -> Self {
+        Self {
+            data: self.data.clone(),
+            block_mask: self.block_mask.clone(),
+            _layout: PhantomData,
+        }
+    }
+
+    /// 既存バッファをそのまま流用してコピーする。const ジェネリクスで
+    /// サイズが固定されているため、再アロケートは発生しない。
+    fn clone_from(&mut self, source: &Self) {
+        self.data.copy_from_slice(&source.data);
+        self.block_mask.copy_from_slice(&source.block_mask);
+    }
 }
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
