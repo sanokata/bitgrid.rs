@@ -48,7 +48,6 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         next
     }
 
-    /// `flood_expand` のアロケーションフリー版。
     /// `flood_expand` のアロケーション抑制版。
     pub fn flood_expand_into(&self, passable: &Self, visited: &mut Self, out: &mut Self) {
         let mut temp = Self::new();
@@ -64,14 +63,17 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.shift_horizontal_into(-1, &mut temp);
         *out |= &temp;
 
-        // 通行可能マスク適用、既訪問除外
-        // (visited を反転させたものをマスクとして使用)
+        // 通行可能マスク適用 + 既訪問除外を実施しつつ、同じ走査内で block_mask を構築。
+        // visited を反転させたものをマスクとして使用するが、!visited は密になり得るため
+        // block_mask によるスキップは効かない。代わりに rebuild_block_mask の二重走査を排除する。
+        out.block_mask.fill(0);
         for i in 0..Self::total_words() {
-            out.data[i] &= !visited.data[i] & passable.data[i];
+            out.data[i] &= passable.data[i] & !visited.data[i];
+            if out.data[i] != 0 {
+                out.block_mask[i / 64] |= 1u64 << (i % 64);
+            }
         }
 
-        // 既訪問リストの更新と後処理
-        out.rebuild_block_mask();
         *visited |= &*out;
     }
 }
