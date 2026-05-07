@@ -78,13 +78,13 @@ pub trait BitLayout<const W: usize, const H: usize>:
     /// Checks if all bits in the specified row range are set
     fn is_all_in_row(data: &[u64], y: i32, min_x: i32, max_x: i32) -> bool;
 
-    /// Converts world coordinates (f32) to tile coordinates (i32)
-    fn world_to_tile(pos: (f32, f32)) -> (i32, i32) {
-        (pos.0.round() as i32, pos.1.round() as i32)
+    /// Converts a continuous position (Point) to discrete grid coordinates (Coord)
+    fn point_to_coord(point: (f32, f32)) -> (i32, i32) {
+        (point.0.floor() as i32, point.1.floor() as i32)
     }
 
-    /// Converts tile coordinates (i32) to world coordinates (f32) (center coordinates)
-    fn tile_to_world(x: i32, y: i32) -> (f32, f32) {
+    /// Converts discrete grid coordinates (Coord) to a continuous position (Point) (center coordinates)
+    fn coord_to_point(x: i32, y: i32) -> (f32, f32) {
         (x as f32, y as f32)
     }
 }

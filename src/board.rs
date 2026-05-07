@@ -48,9 +48,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         Self::total_words().div_ceil(64)
     }
 
-    /// Official conversion from world coordinates to tile coordinates (using floor)
-    pub fn pos_to_tile(x: f32, y: f32) -> (i32, i32) {
-        (x.floor() as i32, y.floor() as i32)
+    /// Official conversion from a continuous position to discrete grid coordinates
+    pub fn pos_to_coord(x: f32, y: f32) -> (i32, i32) {
+        L::point_to_coord((x, y))
     }
 
     /// Converts tile coordinates to a flat spatial index
@@ -360,9 +360,9 @@ mod tests {
 
     #[test]
     fn test_coordinate_utilities() {
-        // pos_to_tile
-        assert_eq!(TestBoard::pos_to_tile(10.5, 20.9), (10, 20));
-        assert_eq!(TestBoard::pos_to_tile(-0.1, -1.5), (-1, -2));
+        // pos_to_coord
+        assert_eq!(TestBoard::pos_to_coord(10.5, 20.9), (10, 20));
+        assert_eq!(TestBoard::pos_to_coord(-0.1, -1.5), (-1, -2));
 
         // tile_to_index / index_to_tile
         let idx = TestBoard::tile_to_index(10, 20).unwrap();
