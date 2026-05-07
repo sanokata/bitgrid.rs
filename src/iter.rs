@@ -106,16 +106,16 @@ mod tests {
 
         let mut count = 0;
         for (x, y) in bb.iter_set_bits() {
-            assert!(x >= 0 && x < 10, "Invalid x: {}", x);
-            assert!(y >= 0 && y < 2, "Invalid y: {}", y);
+            assert!((0..10).contains(&x), "Invalid x: {}", x);
+            assert!((0..2).contains(&y), "Invalid y: {}", y);
             count += 1;
         }
         assert_eq!(count, 20, "Should only visit 20 bits");
 
         let mut intersect_count = 0;
         bb.for_each_overlap(&bb, |x, y, _idx| {
-            assert!(x >= 0 && x < 10, "Invalid x in intersection: {}", x);
-            assert!(y >= 0 && y < 2, "Invalid y in intersection: {}", y);
+            assert!((0..10).contains(&x), "Invalid x in intersection: {}", x);
+            assert!((0..2).contains(&y), "Invalid y in intersection: {}", y);
             intersect_count += 1;
         });
         assert_eq!(intersect_count, 20);

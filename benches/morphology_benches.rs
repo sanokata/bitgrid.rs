@@ -14,8 +14,8 @@ fn bench_morphology(c: &mut Criterion) {
     // Create a square pattern
     for y in 100..150 {
         for x in 100..150 {
-            rm_board.set(x as i32, y as i32, true);
-            mo_board.set(x as i32, y as i32, true);
+            rm_board.set(x, y, true);
+            mo_board.set(x, y, true);
         }
     }
 
