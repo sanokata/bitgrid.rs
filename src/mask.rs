@@ -248,6 +248,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     /// - Scan rows at `distance` one column at a time; determine visibility by comparing
     ///   left/right cell edge slopes with the current wedge (start_slope / end_slope).
     /// - Narrow the wedge upon hitting an opaque cell and recurse for each visible segment.
+    #[allow(clippy::too_many_arguments)]
     fn scan_octant(
         &mut self,
         cx: i32,

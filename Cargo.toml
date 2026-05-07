@@ -1,6 +1,6 @@
 [package]
 name = "bitgrid"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "High-performance bitboard and bitgrid library for 2D spatial queries and visibility"
 license = "MIT OR Apache-2.0"
@@ -9,7 +9,6 @@ readme = "README.md"
 keywords = ["bitboard", "grid", "spatial", "visibility", "pathfinding"]
 categories = ["data-structures", "game-engines", "algorithms"]
 
-# No external dependencies (pure Rust)
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
 
