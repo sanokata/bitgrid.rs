@@ -12,3 +12,19 @@ categories = ["data-structures", "game-engines", "algorithms"]
 # No external dependencies (pure Rust)
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }
+
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+
+[[bench]]
+name = "core_benches"
+harness = false
+
+[[bench]]
+name = "morphology_benches"
+harness = false
+
+[[bench]]
+name = "visibility_benches"
+harness = false
