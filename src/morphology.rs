@@ -15,11 +15,11 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         while current_range < steps {
             let d = (steps - current_range).min(current_range + 1);
 
-            // 正方向
+            // Positive direction
             shift_into(self, d as i32, buffer);
             op(self, buffer);
 
-            // 負方向
+            // Negative direction
             shift_into(self, -(d as i32), buffer);
             op(self, buffer);
 
@@ -27,7 +27,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// セットされたビットを全方向（8方向）に膨張させる (アロケート回避版)
+    /// Dilates set bits in all 8 directions (allocation-avoidance version).
     pub fn dilate_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
         if steps == 0 {
             return;
@@ -50,7 +50,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.finalize();
     }
 
-    /// セットされたビットを全方向（8方向）に膨張させる
+    /// Dilates set bits in all 8 directions.
     pub fn dilate(&self, steps: u32) -> Self {
         if steps == 0 {
             return self.clone();
@@ -61,7 +61,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         res
     }
 
-    /// セットされたビットを全方向（8方向）に収縮させる (アロケート回避版)
+    /// Erodes set bits in all 8 directions (allocation-avoidance version).
     pub fn erode_with_buffer(&mut self, steps: u32, buffer: &mut Self) {
         if steps == 0 {
             return;
@@ -84,7 +84,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.finalize();
     }
 
-    /// セットされたビットを全方向（8方向）に収縮させる
+    /// Erodes set bits in all 8 directions.
     pub fn erode(&self, steps: u32) -> Self {
         if steps == 0 {
             return self.clone();
@@ -107,14 +107,14 @@ mod tests {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
 
-        // 1ステップ膨張
+        // 1-step dilation
         let d1 = bb.dilate(1);
         assert_eq!(d1.count_ones(), 9); // 3x3
         assert!(d1.get(99, 99));
         assert!(d1.get(101, 101));
         assert!(!d1.get(98, 100));
 
-        // 2ステップ膨張
+        // 2-step dilation
         let d2 = bb.dilate(2);
         assert_eq!(d2.count_ones(), 25); // 5x5
         assert!(d2.get(98, 98));
@@ -124,7 +124,7 @@ mod tests {
     #[test]
     fn test_morphology_erode() {
         let mut bb = TestBoard::default();
-        // 3x3 のブロックを作成
+        // Create a 3x3 block
         for x in 99..=101 {
             for y in 99..=101 {
                 bb.set(x, y, true);
@@ -132,15 +132,15 @@ mod tests {
         }
         assert_eq!(bb.count_ones(), 9);
 
-        // 1ステップ収縮
+        // 1-step erosion
         let e1 = bb.erode(1);
-        assert_eq!(e1.count_ones(), 1); // 中心だけ残る
+        assert_eq!(e1.count_ones(), 1); // Only the center remains
         assert!(e1.get(100, 100));
         assert!(!e1.get(99, 99));
 
-        // 2ステップ収縮
+        // 2-step erosion
         let e2 = bb.erode(2);
-        assert_eq!(e2.count_ones(), 0); // すべて消える
+        assert_eq!(e2.count_ones(), 0); // Everything disappears
     }
 
     #[test]
@@ -148,14 +148,14 @@ mod tests {
         let mut bb = TestBoard::default();
         bb.set(0, 0, true);
 
-        let sh_l = bb.shifted_horizontal(-1); // 東から西へ (x-)
+        let sh_l = bb.shifted_horizontal(-1); // East to West (x-)
         assert!(!sh_l.get(0, 0));
-        assert_eq!(sh_l.count_ones(), 0); // 画面外へ
+        assert_eq!(sh_l.count_ones(), 0); // Out of screen
 
-        let sh_r = bb.shifted_horizontal(255); // 西から東へ (x+)
+        let sh_r = bb.shifted_horizontal(255); // West to East (x+)
         assert!(sh_r.get(255, 0));
 
-        let sh_r_out = bb.shifted_horizontal(256); // 画面外へ
+        let sh_r_out = bb.shifted_horizontal(256); // Out of screen
         assert_eq!(sh_r_out.count_ones(), 0);
     }
 
@@ -179,17 +179,17 @@ mod tests {
     #[test]
     fn test_dilate_erode_cycle() {
         let mut bb = TestBoard::default();
-        // 5x5 の矩形
+        // 5x5 rect
         for x in 100..105 {
             for y in 100..105 {
                 bb.set(x, y, true);
             }
         }
 
-        // 2ステップ膨張して2ステップ収縮
+        // 2-step dilation followed by 2-step erosion
         let cycle = bb.dilate(2).erode(2);
 
-        // 元の形状に戻るはず（単純な矩形の場合）
+        // Should return to the original shape (for simple rectangles)
         assert_eq!(cycle.count_ones(), 25);
         assert!(cycle.get(100, 100));
         assert!(cycle.get(104, 104));
@@ -212,7 +212,7 @@ mod tests {
         assert!(e1.is_empty());
     }
 
-    // ─── エッジケースのテスト ───────────────────────────────────────
+    // --- Edge Case Tests ---
 
     #[test]
     fn test_shifted_horizontal_zero_is_identity() {
@@ -220,7 +220,7 @@ mod tests {
         bb.set(10, 5, true);
         bb.set(70, 100, true);
         let sh = bb.shifted_horizontal(0);
-        assert_eq!(sh, bb, "0 シフトは恒等変換");
+        assert_eq!(sh, bb, "Shift by 0 is an identity transformation");
     }
 
     #[test]
@@ -229,7 +229,7 @@ mod tests {
         bb.set(10, 5, true);
         bb.set(70, 100, true);
         let sv = bb.shifted_vertical(0);
-        assert_eq!(sv, bb, "0 シフトは恒等変換");
+        assert_eq!(sv, bb, "Shift by 0 is an identity transformation");
     }
 
     #[test]
@@ -237,13 +237,13 @@ mod tests {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
 
-        // 巨大な正シフト → 全消去
+        // Huge positive shift -> clear all
         let sh_max = bb.shifted_horizontal(i32::MAX);
         assert!(sh_max.is_empty());
         let sh_min = bb.shifted_horizontal(i32::MIN + 1);
         assert!(sh_min.is_empty());
 
-        // 巨大な負シフト → 全消去
+        // Huge negative shift -> clear all
         let sv_big = bb.shifted_vertical(10_000);
         assert!(sv_big.is_empty());
     }
@@ -252,7 +252,7 @@ mod tests {
     fn test_dilate_huge_steps_fills_board() {
         let mut bb = TestBoard::default();
         bb.set(128, 128, true);
-        // 256 ステップ膨張させればボード全体が埋まる
+        // Board should be completely filled after 256 steps of dilation
         let d = bb.dilate(256);
         assert_eq!(d.count_ones(), 256 * 256);
     }
@@ -260,13 +260,13 @@ mod tests {
     #[test]
     fn test_erode_huge_steps_clears_board() {
         let mut bb = TestBoard::default();
-        // 5x5 のブロック
+        // 5x5 block
         for y in 100..105 {
             for x in 100..105 {
                 bb.set(x, y, true);
             }
         }
-        // ブロックサイズ以上の収縮で全消去
+        // Clear all if erosion steps exceed block size
         let e = bb.erode(10);
         assert!(e.is_empty());
     }

@@ -1,27 +1,27 @@
 use super::BitLayout;
 
-/// Morton Order (Z-order curve) レイアウト
+/// Morton Order (Z-order curve) layout
 #[derive(Default, Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MortonLayout;
 
-// ─── ビット展開用のマスク群 ─────────────────────────────────────────
-// `interleave` は 16 ビット値を 32 ビット幅に展開し、各ビット間に 0 を挿入する。
-// 段階的に「ペア化されたビット群」を倍々の距離に広げていくため、それぞれの段階で
-// 隣接する偶数本／奇数本のビットだけを残すマスクを使う:
-// - INTERLEAVE_MASK_8 : 0x00FF_00FF — 8 ビットごと連続を許す
-// - INTERLEAVE_MASK_4 : 0x0F0F_0F0F — 4 ビットごと連続を許す
-// - INTERLEAVE_MASK_2 : 0x3333_3333 — 2 ビットごと連続を許す
-// - INTERLEAVE_MASK_1 : 0x5555_5555 — 1 ビットごとに偶数位置のみ
+// --- Masks for bit-spreading (interleaving) ---
+// `interleave` expands a 16-bit value to 32 bits, inserting a 0 between each bit.
+// Bits are spread out in stages, doubling the distance at each step.
+// Masks ensure only the target bits are kept at each stage:
+// - INTERLEAVE_MASK_8 : 0x00FF_00FF - allows blocks of 8 bits
+// - INTERLEAVE_MASK_4 : 0x0F0F_0F0F - allows blocks of 4 bits
+// - INTERLEAVE_MASK_2 : 0x3333_3333 - allows blocks of 2 bits
+// - INTERLEAVE_MASK_1 : 0x5555_5555 - allows 1 bit every 2 positions (even positions)
 const INTERLEAVE_MASK_8: u32 = 0x00FF_00FF;
 const INTERLEAVE_MASK_4: u32 = 0x0F0F_0F0F;
 const INTERLEAVE_MASK_2: u32 = 0x3333_3333;
 const INTERLEAVE_MASK_1: u32 = 0x5555_5555;
-/// `deinterleave` の最終段で使う「下位 16 ビットだけ残す」マスク。
+/// Mask to keep only the lower 16 bits, used in the final stage of `deinterleave`.
 const DEINTERLEAVE_FINAL_MASK: u32 = 0x0000_FFFF;
 
 impl MortonLayout {
-    /// 16 ビット値を 32 ビット幅に展開し、各ビット間に 0 を 1 ビットずつ挿入する。
-    /// 段階的に間隔を倍にしていく古典的な bit-spreading 実装。
+    /// Expands a 16-bit value to 32 bits, inserting a 0 bit between each bit.
+    /// Classic bit-spreading implementation that doubles the spacing at each step.
     const fn interleave(mut x: u32) -> u32 {
         x = (x | (x << 8)) & INTERLEAVE_MASK_8;
         x = (x | (x << 4)) & INTERLEAVE_MASK_4;
@@ -30,7 +30,7 @@ impl MortonLayout {
         x
     }
 
-    /// `interleave` の逆操作。挿入されたゼロを取り除いて 32 → 16 ビットに圧縮する。
+    /// Inverse operation of `interleave`. Removes the inserted zeros and compresses 32 bits back to 16.
     const fn deinterleave(mut x: u32) -> u32 {
         x &= INTERLEAVE_MASK_1;
         x = (x | (x >> 1)) & INTERLEAVE_MASK_2;
@@ -40,9 +40,9 @@ impl MortonLayout {
         x
     }
 
-    /// (x, y) を Morton コードへ変換: x ビットを偶数位置、y ビットを奇数位置に配置する。
+    /// Converts (x, y) to Morton code: places x bits at even positions and y bits at odd positions.
     pub const fn encode(x: u32, y: u32) -> usize {
-        // y を 1 ビット左シフトして奇数位置に置き、x（偶数位置）と OR で合成
+        // Shift y by 1 bit to place it in odd positions, then OR with x (even positions)
         (Self::interleave(x) as usize) | ((Self::interleave(y) as usize) << 1)
     }
 
@@ -221,7 +221,7 @@ impl<const W: usize, const H: usize> BitLayout<W, H> for MortonLayout {
         for by in min_blk_y..=max_blk_y {
             let local_min_y = if by == min_blk_y { y1 % 8 } else { 0 };
             let local_max_y = if by == max_blk_y { (y2 - 1) % 8 } else { 7 };
-            let y_bits = Self::encode(0, by * 8); // y のビット寄与分を計算
+            let y_bits = Self::encode(0, by * 8); // Calculate bit contribution of y
 
             for bx in min_blk_x..=max_blk_x {
                 let local_min_x = if bx == min_blk_x { x1 % 8 } else { 0 };

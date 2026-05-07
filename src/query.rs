@@ -1,19 +1,19 @@
 use crate::{BitBoard, BitLayout};
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
-    /// ボード上に一つでもオン（1）のビットがあるか確認
+    /// Checks if any bit is on (1) on the board.
     #[inline]
     pub fn has_any(&self) -> bool {
         self.block_mask.iter().any(|&w| w != 0)
     }
 
-    /// ボードが完全に空であるか確認
+    /// Checks if the board is completely empty.
     #[inline]
     pub fn is_empty(&self) -> bool {
         !self.has_any()
     }
 
-    /// セットされているビットの総数を階層化マスクを利用して高速にカウント
+    /// Counts the total number of set bits efficiently using the hierarchical mask.
     pub fn count_ones(&self) -> usize {
         let mut count = 0;
         for i in 0..Self::block_words() {
@@ -27,12 +27,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         count
     }
 
-    /// 指定した行の指定範囲内にオン（1）のビットがあるか確認
+    /// Checks if any bit is on (1) in the specified range of the specified row.
     pub fn has_any_in_row(&self, y: i32, min_x: i32, max_x: i32) -> bool {
         L::has_any_in_row(&self.data, y, min_x, max_x)
     }
 
-    /// 別のボードとの積集合（AND）が 1 であるビットを指定範囲内のみ高速に走査
+    /// Efficiently scans bits where the intersection (AND) with another board is 1.
     pub fn for_each_overlap<F>(&self, other: &Self, mut callback: F)
     where
         F: FnMut(i32, i32, usize),
@@ -65,7 +65,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 全てのオン（1）ビットを階層化マスクを利用して高速に走査
+    /// Efficiently scans all on (1) bits using the hierarchical mask.
     pub fn for_each_bit<F>(&self, mut callback: F)
     where
         F: FnMut(i32, i32, usize),
@@ -87,7 +87,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 指定したタイル範囲内でのみ、別のボードとの積集合（AND）を高速走査
+    /// Efficiently scans the intersection (AND) with another board only within the specified tile range.
     pub fn for_each_overlap_in<F>(
         &self,
         other: &Self,
@@ -104,7 +104,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         });
     }
 
-    /// 指定した矩形範囲（中心 x, y、半径 radius）内がすべてセット（1）されているか判定
+    /// Determines if all bits in the specified rectangular area (center x, y, radius radius) are set (1).
     pub fn is_area_all_set(&self, x: i32, y: i32, radius: i32) -> bool {
         let x1 = x - radius;
         let x2 = x + radius;
@@ -119,7 +119,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         true
     }
 
-    /// 指定した矩形範囲（中心 x, y、半径 radius）内に一つでもセット（1）されたビットがあるか判定
+    /// Determines if at least one bit in the specified rectangular area (center x, y, radius radius) is set (1).
     pub fn is_area_any_set(&self, x: i32, y: i32, radius: i32) -> bool {
         let x1 = x - radius;
         let x2 = x + radius;
@@ -191,32 +191,32 @@ mod tests {
     #[test]
     fn test_area_queries() {
         let mut bb = TestBoard::default();
-        // (10, 10) を中心に 3x3 (radius=1) を塗りつぶす
+        // Fill a 3x3 (radius=1) centered at (10, 10)
         for y in 9..=11 {
             for x in 9..=11 {
                 bb.set(x, y, true);
             }
         }
 
-        // 正常系: すべてセットされている
+        // Normal case: all set
         assert!(bb.is_area_all_set(10, 10, 1)); // 3x3
-        assert!(bb.is_area_all_set(10, 10, 0)); // 1x1 中心
-        assert!(bb.is_area_any_set(10, 10, 2)); // より広い範囲
+        assert!(bb.is_area_all_set(10, 10, 0)); // 1x1 center
+        assert!(bb.is_area_any_set(10, 10, 2)); // Wider area
 
-        // 一部欠けている場合
+        // Partially missing case
         bb.set(9, 9, false);
         assert!(!bb.is_area_all_set(10, 10, 1));
         assert!(bb.is_area_any_set(10, 10, 1));
 
-        // 完全に空の範囲
+        // Completely empty range
         assert!(!bb.is_area_any_set(100, 100, 10));
 
-        // 境界条件: マップ端
+        // Boundary condition: map edge
         let mut edge_bb = TestBoard::default();
         edge_bb.set(0, 0, true);
         assert!(edge_bb.is_area_all_set(0, 0, 0));
-        // radius=1 だと (-1, -1) 等を含むが、これは範囲外なので通常 false 扱い（または実装に依存）
-        // 現状の実装では範囲外は 0 (false) として扱うため、all_set は false になる
+        // radius=1 includes (-1, -1), etc., which are out-of-bounds.
+        // Since the current implementation treats out-of-bounds as 0 (false), all_set returns false.
         assert!(!edge_bb.is_area_all_set(0, 0, 1));
         assert!(edge_bb.is_area_any_set(0, 0, 1));
     }

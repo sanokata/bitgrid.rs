@@ -1,16 +1,16 @@
 use crate::{BitBoard, BitLayout};
 
-/// レイの方向ベクトルを「水平」とみなすときの判定 ε。
-/// vy の絶対値がこの値未満なら「ほぼ水平」として全範囲または無効範囲に分岐する。
+/// Epsilon for considering a ray direction vector as "horizontal".
+/// If |vy| is less than this value, it branches to either full or invalid range.
 const RAY_DIRECTION_EPSILON: f32 = 1e-6;
 
-/// シャドウキャスティングで参照するセル境界スロープのオフセット。
-/// セルの中心を 0、左右端を ±0.5 とした場合の境界傾斜。
+/// Offset for cell boundary slopes in shadow casting.
+/// Boundary inclination when cell center is 0 and edges are ±0.5.
 const CELL_SLOPE_OFFSET: f32 = 0.5;
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
-    /// 指定した矩形範囲のみを 1 にしたマスクを作成
-    /// 範囲情報の高速な抽出・制限に使用
+    /// Creates a mask where only the specified rectangular range is set to 1.
+    /// Used for fast extraction and limitation of range information.
     pub fn mask_rect(x: i32, y: i32, width: i32, height: i32) -> Self {
         let mut res = Self::new();
         L::rect_op(
@@ -85,7 +85,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                     );
                 }
             } else {
-                // 凹型: 円を塗ってから「隙間（逆側の凸セクター）」を消去
+                // Concave: Fill the entire circle, then erase the "gap" (the convex sector on the opposite side)
                 mask.set_row(
                     y,
                     (cx_f + x_c_min).ceil() as i32,
@@ -108,7 +108,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         mask
     }
 
-    /// 2つのレイ（開始/終了）に挟まれた凸領域の x 範囲を計算する
+    /// Calculates the x-range of a convex region sandwiched between two rays (start/end).
     fn calc_convex_range(
         dy: f32,
         x_min: f32,
@@ -123,10 +123,10 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         (x_min.max(r1_min).max(r2_min), x_max.min(r1_max).min(r2_max))
     }
 
-    /// 特定のレイ（方向ベクトル vx, vy）による x の境界範囲を計算
+    /// Calculates the boundary range of x for a specific ray (direction vector vx, vy).
     fn get_ray_x_limit(dy: f32, vx: f32, vy: f32, is_start: bool) -> (f32, f32) {
         if vy.abs() < RAY_DIRECTION_EPSILON {
-            // 水平レイ: dy の正負とベクトルの向きで全範囲か無効範囲かが決まる
+            // Horizontal ray: Entire or invalid range determined by the sign of dy and vector direction
             let ok = if is_start {
                 vx * dy >= -RAY_DIRECTION_EPSILON
             } else {
@@ -158,7 +158,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 遮蔽物（opaque_board）を考慮した視界マスクを生成 (新しいボードを確保)
+    /// Generates a visibility mask considering obstructions (opaque_board) (allocates a new board).
     pub fn mask_visibility(
         cx: i32,
         cy: i32,
@@ -170,7 +170,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         mask
     }
 
-    /// 遮蔽物（opaque_board）を考慮した視界マスクを既存のボードに生成 (アロケーションフリー)
+    /// Generates a visibility mask considering obstructions (opaque_board) in an existing board (allocation-free).
     pub fn mask_visibility_into(
         &mut self,
         cx: i32,
@@ -179,35 +179,75 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         opaque_board: &BitBoard<W, H, L>,
     ) {
         self.clear();
-        self.set(cx, cy, true); // 立っている位置は必ず見える
+        self.set(cx, cy, true); // The tile at the origin is always visible
 
-        // 8 オクタントの基底ベクトル (xx, xy, yx, yy)
+        // Basis vectors for 8 octants (xx, xy, yx, yy)
         const OCTANTS: [Octant; 8] = [
-            Octant { xx: 1, xy: 0, yx: 0, yy: -1 },
-            Octant { xx: 0, xy: 1, yx: -1, yy: 0 },
-            Octant { xx: 0, xy: 1, yx: 1, yy: 0 },
-            Octant { xx: -1, xy: 0, yx: 0, yy: 1 },
-            Octant { xx: -1, xy: 0, yx: 0, yy: -1 },
-            Octant { xx: 0, xy: -1, yx: -1, yy: 0 },
-            Octant { xx: 0, xy: -1, yx: 1, yy: 0 },
-            Octant { xx: 1, xy: 0, yx: 0, yy: 1 },
+            Octant {
+                xx: 1,
+                xy: 0,
+                yx: 0,
+                yy: -1,
+            },
+            Octant {
+                xx: 0,
+                xy: 1,
+                yx: -1,
+                yy: 0,
+            },
+            Octant {
+                xx: 0,
+                xy: 1,
+                yx: 1,
+                yy: 0,
+            },
+            Octant {
+                xx: -1,
+                xy: 0,
+                yx: 0,
+                yy: 1,
+            },
+            Octant {
+                xx: -1,
+                xy: 0,
+                yx: 0,
+                yy: -1,
+            },
+            Octant {
+                xx: 0,
+                xy: -1,
+                yx: -1,
+                yy: 0,
+            },
+            Octant {
+                xx: 0,
+                xy: -1,
+                yx: 1,
+                yy: 0,
+            },
+            Octant {
+                xx: 1,
+                xy: 0,
+                yx: 0,
+                yy: 1,
+            },
         ];
 
         for octant in OCTANTS {
             self.scan_octant(cx, cy, radius, 1, 1.0, 0.0, octant, opaque_board);
         }
 
-        // 階層化マスクを更新（走査中に set を呼んでいるため）
+        // Update block mask (since set() was called during scanning)
         self.rebuild_block_mask();
     }
 
-    /// 再帰的シャドウキャスティングの走査コアロジック。
-    /// `octant` で 8 方向の基底ベクトルを抽象化し、引数を集約する。
+    /// Core scanning logic for recursive shadowcasting.
+    /// Abstracts 8 basis vectors via `octant` to consolidate arguments.
     ///
-    /// アルゴリズムは Berg/Mejaski 式の Recursive Shadowcasting:
-    /// - 距離 `distance` の行を 1 列ずつ走査し、各セルの左右端傾斜と
-    ///   現在の楔（start_slope / end_slope）を比較して可視判定を行う
-    /// - 不透明セルにぶつかったら以降の楔を縮め、視認可能な区間ごとに再帰
+    /// Recursive Shadowcasting algorithm (Berg/Mejaski method):
+    /// - Scan rows at `distance` one column at a time; determine visibility by comparing
+    ///   left/right cell edge slopes with the current wedge (start_slope / end_slope).
+    /// - Narrow the wedge upon hitting an opaque cell and recurse for each visible segment.
     fn scan_octant(
         &mut self,
         cx: i32,
@@ -226,7 +266,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         let radius_sq = radius * radius;
 
         for distance in row..=(radius.ceil() as i32) {
-            // セルの直前状態: None=初期 / Some(true)=不透明 / Some(false)=透明
+            // Cell state: None=Initial / Some(true)=Opaque / Some(false)=Transparent
             let mut last_was_opaque: Option<bool> = None;
 
             for i in (0..=distance).rev() {
@@ -235,13 +275,13 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                 let x = cx + dx;
                 let y = cy + dy;
 
-                // マップ範囲外は走査をスキップ（高速化のため早期に判定）
+                // Skip scanning if out of map bounds (early check for optimization)
                 if x < 0 || x >= W as i32 || y < 0 || y >= H as i32 {
                     continue;
                 }
 
-                // 当該セルの左右端の傾斜（start_slope/end_slope は楔の左右境界）。
-                // セル中心 ± CELL_SLOPE_OFFSET を取って左右端の傾斜を計算する。
+                // Inclination of left/right cell edges (start_slope/end_slope are wedge boundaries).
+                // Calculate slopes of left/right edges relative to cell center ± CELL_SLOPE_OFFSET.
                 let l_slope =
                     (i as f32 + CELL_SLOPE_OFFSET) / (distance as f32 - CELL_SLOPE_OFFSET);
                 let r_slope =
@@ -261,15 +301,12 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                 let is_opaque = opaque_board.get(x, y);
                 match last_was_opaque {
                     Some(true) if !is_opaque => {
-                        // 不透明 → 透明: 楔の左境界を更新して継続
+                        // Opaque -> Transparent: Update left wedge boundary and continue
                         start_slope = l_slope;
                         last_was_opaque = Some(false);
                     }
-                    Some(false) if is_opaque
-                        && distance < radius as i32
-                        && l_slope > end_slope =>
-                    {
-                        // 透明 → 不透明: 見えている区間で再帰し、不透明をマーク
+                    Some(false) if is_opaque && distance < radius as i32 && l_slope > end_slope => {
+                        // Transparent -> Opaque: Recurse for the visible segment and mark as opaque
                         self.scan_octant(
                             cx,
                             cy,
@@ -288,7 +325,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
                 }
             }
 
-            // 行末が不透明で終わった場合、これ以上遠い距離は楔全体が遮蔽される
+            // If the end of the row is opaque, the entire wedge beyond this distance is blocked
             if last_was_opaque == Some(true) {
                 break;
             }
@@ -296,9 +333,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     }
 }
 
-/// シャドウキャスティングの 8 オクタントを示す基底変換。
-/// (dx, dy) = (distance * xx + i * xy, distance * yx + i * yy) の形で
-/// オクタントごとの座標変換を表現する。
+/// Basis transformation representing the 8 octants for shadowcasting.
+/// Expresses coordinate transformation per octant in the form:
+/// (dx, dy) = (distance * xx + i * xy, distance * yx + i * yy)
 #[derive(Debug, Clone, Copy)]
 struct Octant {
     xx: i32,
@@ -315,8 +352,8 @@ mod tests {
 
     #[test]
     fn test_mask_rect() {
-        // 64タイルを跨ぐ矩形 (x=60, w=10)
-        // word 0 の bits 60-63 と word 1 の bits 0-5 が 1 になるはず
+        // Rect spanning 64 tiles (x=60, w=10)
+        // word 0 bits 60-63 and word 1 bits 0-5 should be 1
         let mask = TestBoard::mask_rect(60, 0, 10, 1);
 
         assert!(mask.get(60, 0));
@@ -325,15 +362,15 @@ mod tests {
         assert!(mask.get(69, 0));
         assert!(!mask.get(59, 0));
         assert!(!mask.get(70, 0));
-        assert!(!mask.get(65, 1)); // 別の行
+        assert!(!mask.get(65, 1)); // Another row
 
-        // マスク操作のシミュレーション
+        // Mask operation simulation
         let mut data = TestBoard::default();
         data.set(65, 0, true);
         data.set(75, 0, true);
         let result: BitBoard<256, 256> = &data & &mask;
-        assert!(result.get(65, 0)); // マスク内なので維持
-        assert!(!result.get(75, 0)); // マスク外なので消える
+        assert!(result.get(65, 0)); // Maintained as it is within the mask
+        assert!(!result.get(75, 0)); // Erased as it is outside the mask
     }
 
     #[test]
@@ -342,41 +379,41 @@ mod tests {
         let cy = 100;
         let radius = 10.0;
 
-        // 全円
+        // Full circle
         let circle = TestBoard::mask_sector(cx, cy, radius, 0.0, 360.0);
         assert!(circle.get(cx, cy));
         assert!(circle.get(cx + 10, cy));
         assert!(!circle.get(cx + 11, cy));
 
-        // 右下 90 度の扇形
+        // 90-degree sector (lower-right)
         let sector = TestBoard::mask_sector(cx, cy, radius, 0.0, 90.0);
-        assert!(sector.get(cx + 5, cy + 5)); // 右下
-        assert!(!sector.get(cx - 5, cy + 5)); // 左下は範囲外
+        assert!(sector.get(cx + 5, cy + 5)); // Lower-right
+        assert!(!sector.get(cx - 5, cy + 5)); // Lower-left is out of range
     }
 
     #[test]
     fn test_mask_visibility() {
         let mut opaque = TestBoard::default();
-        // 壁を建てる (x=105, y=95..105)
+        // Build a wall (x=105, y=95..105)
         for y in 95..=105 {
             opaque.set(105, y, true);
         }
 
         let vis = TestBoard::mask_visibility(100, 100, 20.0, &opaque);
 
-        assert!(vis.get(104, 100)); // 壁の直前は見えている
-        assert!(vis.get(105, 100)); // 壁そのものも見えている
+        assert!(vis.get(104, 100)); // Visible just before the wall
+        assert!(vis.get(105, 100)); // Wall itself is also visible
         assert!(
             !vis.get(106, 100),
             "Tile (106, 100) should be hidden by wall at (105, 100)"
         );
-        assert!(vis.get(100, 120)); // 反対側は見えている
+        assert!(vis.get(100, 120)); // Opposite side is visible
     }
 
     #[test]
     fn test_mask_visibility_diagonal_pillar() {
         let mut opaque = TestBoard::default();
-        // (100,100) から見て右下方向に 2x2 の柱を立てる
+        // Build a 2x2 pillar lower-right relative to (100,100)
         opaque.set(105, 105, true);
         opaque.set(106, 105, true);
         opaque.set(105, 106, true);
@@ -386,12 +423,12 @@ mod tests {
 
         assert!(vis.get(104, 104), "Pillar front should be visible");
         assert!(vis.get(105, 105), "Pillar itself should be visible");
-        // 柱の真後ろ (107, 107) やその延長線上のタイルは影になるべき
+        // Tiles directly behind the pillar (107, 107) and its extension should be in shadow
         assert!(
             !vis.get(108, 108),
             "Tile behind the 2x2 pillar should be hidden"
         );
-        // 柱の横 (108, 105) は視界が通るべき
+        // Tiles adjacent to the shadow (108, 105) should be visible
         assert!(
             vis.get(108, 105),
             "Tile adjacent to the shadow should be visible"
@@ -404,8 +441,8 @@ mod tests {
         let cy = 100;
         let radius = 10.0;
 
-        // 凹型セクター (右方向を中心に 270度 = 上、右、下の範囲。左側が欠ける扇形)
-        // このロジックは内部で「全円から左方向の90度凸型セクターを引き算する」パスを通る
+        // Concave sector (270 degrees centered to the right = top, right, bottom. Left side is missing)
+        // This logic internally passes "subtract a 90-degree convex sector pointing left from the full circle"
         let sector = TestBoard::mask_sector(cx, cy, radius, -135.0, 270.0);
 
         assert!(sector.get(cx + 5, cy), "Right should be included");
@@ -420,13 +457,13 @@ mod tests {
     #[test]
     fn test_mask_visibility_out_of_bounds() {
         let opaque = TestBoard::default();
-        // マップの左上隅 (0, 0) で視界計算。負の座標にアクセスしようとしてもパニックしないか。
+        // Scan visibility at the top-left corner (0, 0) of the map. Ensure it doesn't panic when accessing negative coordinates.
         let vis_tl = TestBoard::mask_visibility(0, 0, 10.0, &opaque);
         assert!(vis_tl.get(0, 0));
         assert!(vis_tl.get(5, 5));
-        assert!(!vis_tl.get(-1, -1)); // 範囲外は false になること
+        assert!(!vis_tl.get(-1, -1)); // Out-of-bounds should be false
 
-        // マップの右下隅 (255, 255)
+        // Bottom-right corner (255, 255)
         let vis_br = TestBoard::mask_visibility(255, 255, 10.0, &opaque);
         assert!(vis_br.get(255, 255));
         assert!(vis_br.get(250, 250));
@@ -434,14 +471,14 @@ mod tests {
 
     #[test]
     fn test_mask_rect_out_of_bounds() {
-        // 部分的に外側
+        // Partially outside
         let mask = TestBoard::mask_rect(-5, -5, 10, 10);
         assert!(mask.get(0, 0));
         assert!(mask.get(4, 4));
         assert!(!mask.get(5, 5));
         assert_eq!(mask.count_ones(), 25); // 5x5 visible part
 
-        // 完全に外側
+        // Completely outside
         let mask_out = TestBoard::mask_rect(300, 300, 10, 10);
         assert_eq!(mask_out.count_ones(), 0);
     }
@@ -452,41 +489,41 @@ mod tests {
         let cy = 100;
         let radius = 10.0;
 
-        // 360度を超えるスイープは全円になるか
+        // Sweep exceeding 360 degrees should result in a full circle
         let full = TestBoard::mask_sector(cx, cy, radius, 0.0, 400.0);
         assert_eq!(
             full.count_ones(),
             TestBoard::mask_sector(cx, cy, radius, 0.0, 360.0).count_ones()
         );
 
-        // 負の開始角度を含むケース
+        // Case including a negative starting angle
         let neg_start = TestBoard::mask_sector(cx, cy, radius, -20.0, 40.0);
-        assert!(neg_start.get(cx + 5, cy)); // 右方向 (0度)
-        assert!(neg_start.get(cx + 5, cy - 1)); // 約 -11.3 度 (範囲内)
-        assert!(neg_start.get(cx + 5, cy + 1)); // 約 +11.3 度 (範囲内)
+        assert!(neg_start.get(cx + 5, cy)); // Right direction (0 degrees)
+        assert!(neg_start.get(cx + 5, cy - 1)); // Approx -11.3 degrees (within range)
+        assert!(neg_start.get(cx + 5, cy + 1)); // Approx +11.3 degrees (within range)
     }
 
     #[test]
     fn test_mask_visibility_thin_walls() {
         let mut opaque = TestBoard::default();
-        // 薄い水平の壁
+        // Thin horizontal wall
         for x in 90..=110 {
             opaque.set(x, 105, true);
         }
 
         let vis = TestBoard::mask_visibility(100, 100, 20.0, &opaque);
         assert!(vis.get(100, 104));
-        assert!(vis.get(100, 105)); // 壁自体
-        assert!(!vis.get(100, 106)); // 壁の向こう
+        assert!(vis.get(100, 105)); // Wall itself
+        assert!(!vis.get(100, 106)); // Beyond the wall
     }
 
-    // ─── エッジケースのテスト ───────────────────────────────────────
+    // --- Edge Case Tests ---
 
     #[test]
     fn test_mask_visibility_zero_radius() {
         let opaque = TestBoard::default();
         let vis = TestBoard::mask_visibility(100, 100, 0.0, &opaque);
-        // radius=0 でも自分自身のタイルだけは見える
+        // Even with radius=0, its own tile is visible
         assert!(vis.get(100, 100));
         assert!(!vis.get(101, 100));
         assert!(!vis.get(100, 101));
@@ -495,7 +532,7 @@ mod tests {
     #[test]
     fn test_mask_visibility_completely_enclosed() {
         let mut opaque = TestBoard::default();
-        // 周囲 8 方向を全て壁で囲む（中央が完全密室）
+        // Enclose all 8 surrounding directions with walls (center is completely sealed)
         for dy in -1..=1 {
             for dx in -1..=1 {
                 if dx != 0 || dy != 0 {
@@ -504,10 +541,10 @@ mod tests {
             }
         }
         let vis = TestBoard::mask_visibility(100, 100, 20.0, &opaque);
-        // 自分と隣接 8 タイル（壁含む）は見える
+        // Self and adjacent 8 tiles (including walls) are visible
         assert!(vis.get(100, 100));
         assert!(vis.get(101, 101));
-        // 2 マス離れたタイルは壁で遮蔽されて見えない
+        // Tiles 2 units away are blocked by walls and invisible
         assert!(!vis.get(102, 102));
         assert!(!vis.get(102, 100));
         assert!(!vis.get(100, 102));
@@ -515,10 +552,10 @@ mod tests {
 
     #[test]
     fn test_mask_sector_zero_sweep_does_not_panic() {
-        // sweep=0 は退化形。具体的なセマンティクスは実装依存だが、
-        // パニックせず、有限なビット数を返すことだけを保証する
+        // sweep=0 is a degenerate form. Exact semantics are implementation-defined,
+        // but guarantee it doesn't panic and returns a finite number of bits.
         let m = TestBoard::mask_sector(100, 100, 10.0, 0.0, 0.0);
-        // 円の上限（21*21 = 441）を超えないこと
+        // Should not exceed upper bound for circle (21*21 = 441)
         assert!(m.count_ones() <= 21 * 21);
     }
 
@@ -530,30 +567,30 @@ mod tests {
         assert_eq!(
             circle_360.count_ones(),
             circle_720.count_ones(),
-            "720 度スイープは 360 度と同じ全円になるべき"
+            "720-degree sweep should result in the same full circle as 360 degrees"
         );
     }
 
     #[test]
     fn test_mask_sector_zero_radius_is_empty() {
         let m = TestBoard::mask_sector(100, 100, 0.0, 0.0, 360.0);
-        assert_eq!(m.count_ones(), 0, "radius=0 は空マスク");
+        assert_eq!(m.count_ones(), 0, "radius=0 results in an empty mask");
     }
 
     #[test]
     fn test_mask_visibility_center_in_wall() {
         let mut opaque = TestBoard::default();
-        opaque.set(100, 100, true); // 中心が壁
+        opaque.set(100, 100, true); // Center is a wall
         let vis = TestBoard::mask_visibility(100, 100, 5.0, &opaque);
-        // 中心（プレイヤー位置）は常に見える
+        // Center (player position) is always visible
         assert!(vis.get(100, 100));
-        // 周囲は通常通り見える
+        // Surroundings are visible as usual
         assert!(vis.get(102, 100));
     }
 
     #[test]
     fn test_mask_rect_zero_dimensions() {
-        // 幅 0 / 高さ 0 の矩形は空のマスクのはず
+        // Rect with width 0 or height 0 should be an empty mask
         let m_zero_w = TestBoard::mask_rect(10, 10, 0, 5);
         assert_eq!(m_zero_w.count_ones(), 0);
 

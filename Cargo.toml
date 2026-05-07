@@ -3,6 +3,6 @@ name = "lexaos_bitboard"
 version = "0.1.0"
 edition = "2024"
 
-# 依存関係なし（純粋なRust）
+# No external dependencies (pure Rust)
 [dependencies]
 serde = { version = "1.0", features = ["derive"] }

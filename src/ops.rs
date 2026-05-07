@@ -1,23 +1,26 @@
 use crate::{BitBoard, layout::BitLayout};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-// ─────────────── 疎なビット演算用マクロ ───────────────────────────────
+// --- Macros for sparse bitwise operations ---
 
+/// Macro to implement binary operations for sparse bitboards.
 macro_rules! impl_sparse_binop {
-    ($trait:ident, $method:ident, $op:tt, $assign_op:tt) => {
-        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $trait for &BitBoard<W, H, L> {
+    ($Trait:ident, $method:ident, $block_op:tt, $data_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait for &BitBoard<W, H, L> {
             type Output = BitBoard<W, H, L>;
             fn $method(self, rhs: Self) -> Self::Output {
                 let mut result = BitBoard::new();
-                for i in 0..self.block_mask.len() {
-                    let m = self.block_mask[i] $op rhs.block_mask[i];
-                    if m == 0 { continue; }
-                    result.block_mask[i] = m;
-                    for j in 0..64 {
-                        if (m & (1u64 << j)) != 0 {
-                            let idx = i * 64 + j;
-                            result.data[idx] = self.data[idx] $op rhs.data[idx];
+                for i in 0..BitBoard::<W, H, L>::block_words() {
+                    let mut bits = self.block_mask[i] $block_op rhs.block_mask[i];
+                    while bits != 0 {
+                        let bit = bits.trailing_zeros();
+                        let idx = i * 64 + bit as usize;
+                        let val = self.data[idx] $data_op rhs.data[idx];
+                        if val != 0 {
+                            result.data[idx] = val;
+                            result.block_mask[i] |= 1u64 << bit;
                         }
+                        bits &= bits - 1;
                     }
                 }
                 result
@@ -26,49 +29,45 @@ macro_rules! impl_sparse_binop {
     };
 }
 
+/// Macro to implement assignment operations for sparse bitboards.
 macro_rules! impl_sparse_assign_op {
-    ($trait:ident, $method:ident, $mask_op:tt, $assign_op:tt) => {
-        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $trait<&BitBoard<W, H, L>> for BitBoard<W, H, L> {
+    ($Trait:ident, $method:ident, $block_union:tt, $data_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait<&BitBoard<W, H, L>> for BitBoard<W, H, L> {
             fn $method(&mut self, rhs: &BitBoard<W, H, L>) {
-                // mask は入力の両方の OR に基づいて走査 (OR のビットが立っている場所だけ演算が必要)
-                let combined_mask = self.block_mask.len();
-                for i in 0..combined_mask {
-                    let m = self.block_mask[i] $mask_op rhs.block_mask[i];
-                    if m == 0 {
-                        // 両方空なら self は 0 になるはず
-                        // (BitAndAssign の場合は self の既存ビットも消える)
-                        // ただし AND なら self.mask & rhs.mask で 0 なら data も 0
-                        // OR/XOR なら self.mask | rhs.mask で 0 なら元々 0
-                        continue;
-                    }
-                    for j in 0..64 {
-                        let idx = i * 64 + j;
-                        if idx >= self.data.len() { break; }
-                        self.data[idx] $assign_op rhs.data[idx];
+                for i in 0..BitBoard::<W, H, L>::block_words() {
+                    let mut bits = self.block_mask[i] $block_union rhs.block_mask[i];
+                    self.block_mask[i] = 0;
+                    while bits != 0 {
+                        let bit = bits.trailing_zeros();
+                        let idx = i * 64 + bit as usize;
+                        self.data[idx] $data_op rhs.data[idx];
+                        if self.data[idx] != 0 {
+                            self.block_mask[i] |= 1u64 << bit;
+                        }
+                        bits &= bits - 1;
                     }
                 }
-                self.rebuild_block_mask();
             }
         }
     };
 }
 
-// ─────────────── トレイト実装 ───────────────────────────────
+// --- Trait Implementations ---
 
-// AND
+// AND: Skips via block mask as result is likely to be sparse
 impl_sparse_binop!(BitAnd, bitand, &, &);
 impl_sparse_assign_op!(BitAndAssign, bitand_assign, |, &=);
 
-// XOR
+// XOR: Intermediate nature, but can skip common parts via macro
 impl_sparse_binop!(BitXor, bitxor, |, ^);
 impl_sparse_assign_op!(BitXorAssign, bitxor_assign, |, ^=);
 
-// OR
+// OR: Result likely to be dense, but block skip is effective if inputs are sparse
 impl_sparse_binop!(BitOr, bitor, |, |);
 impl_sparse_assign_op!(BitOrAssign, bitor_assign, |, |=);
 
 // NOT
-// 反転と block_mask 構築を 1 パスで行うことで rebuild_block_mask の追加走査を排除する。
+// Performs inversion and block_mask construction in a single pass to eliminate an additional pass by rebuild_block_mask.
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for &BitBoard<W, H, L> {
     type Output = BitBoard<W, H, L>;
     fn not(self) -> Self::Output {
@@ -83,7 +82,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for &BitBoard<W, H,
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for BitBoard<W, H, L> {
     type Output = BitBoard<W, H, L>;
     fn not(mut self) -> Self::Output {
-        // src と dst が同じスライスでも安全（インデックスごとに独立な書き換え）
+        // src and dst can be the same slice (independent rewrites per index)
         let total = BitBoard::<W, H, L>::total_words();
         self.block_mask.fill(0);
         for i in 0..total {
@@ -98,7 +97,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for BitBoard<W, H, 
     }
 }
 
-/// `src` を反転して `dst_data` に書き込み、同時に `dst_block_mask` を構築する。
+/// Inverts `src` and writes to `dst_data`, while simultaneously constructing `dst_block_mask`.
 #[inline]
 fn not_into(src: &[u64], dst_data: &mut [u64], dst_block_mask: &mut [u64]) {
     debug_assert_eq!(src.len(), dst_data.len());
@@ -112,8 +111,8 @@ fn not_into(src: &[u64], dst_data: &mut [u64], dst_block_mask: &mut [u64]) {
     }
 }
 
-/// `clear_padding` 後に最終ワードが 0 になった場合、 block_mask を補正する。
-/// レイアウトにパディングがない場合 -> no-op。
+/// Corrects `block_mask` if the final word becomes 0 after `clear_padding`.
+/// No-op if the layout has no padding.
 #[inline]
 fn fix_padding_block_mask<const W: usize, const H: usize, L: BitLayout<W, H>>(
     data: &[u64],
@@ -131,7 +130,7 @@ fn fix_padding_block_mask<const W: usize, const H: usize, L: BitLayout<W, H>>(
     }
 }
 
-// ─────────────── 所有権ベースの演算子 ───────────────────────────────
+// --- Ownership-based Operators ---
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitAnd for BitBoard<W, H, L> {
     type Output = Self;
@@ -247,7 +246,7 @@ mod tests {
         assert!(!xor_res.get(10, 10));
     }
 
-    // ─── エッジケースのテスト ───────────────────────────────────────
+    // --- Edge Case Tests ---
 
     #[test]
     fn test_not_ref_and_owned_match() {
@@ -259,33 +258,36 @@ mod tests {
 
         let by_ref = !&a;
         let by_owned = !a.clone();
-        assert_eq!(by_ref, by_owned, "&BitBoard と所有版の NOT は一致するべき");
+        assert_eq!(
+            by_ref, by_owned,
+            "In NOT, ref and owned versions should match"
+        );
     }
 
     #[test]
     fn test_not_with_padding_does_not_leak() {
-        // W が 64 の倍数でないボードでパディングが反転で漏れないこと
+        // Ensure padding does not leak in NOT for boards where W is not a multiple of 64
         type Bb = BitBoard<100, 4>;
         let bb = Bb::default();
         let inverted = !bb;
-        // 全部 1 のはずだが、padding ビットは 0 のまま
+        // Should be all 1s logically, but padding bits remain 0
         assert_eq!(inverted.count_ones(), 100 * 4);
-        // 範囲外座標へのアクセスは false（パディング由来でないことを確認）
+        // Access to out-of-bounds coordinates is false (verify it's not due to padding)
         for (x, _y) in inverted.iter_set_bits() {
-            assert!(x < 100, "パディング由来のビットが漏れている: x={x}");
+            assert!(x < 100, "Padding bit leaked: x={x}");
         }
     }
 
     #[test]
     fn test_and_result_block_mask_consistency() {
-        // disjoint な集合での AND は空、block_mask も完全に 0 でなければならない
+        // AND on disjoint sets should be empty, and block_mask must be completely 0
         let mut a = TestBoard::default();
         let mut b = TestBoard::default();
         a.set(10, 10, true);
         b.set(20, 20, true);
         let r = &a & &b;
         assert_eq!(r.count_ones(), 0);
-        assert!(r.is_empty(), "block_mask を含めて空であること");
+        assert!(r.is_empty(), "Should be empty including block_mask");
     }
 
     #[test]
@@ -295,7 +297,7 @@ mod tests {
         type Morton = BitBoard<128, 128, MortonLayout>;
         type RowMajor = BitBoard<128, 128, RowMajorLayout>;
 
-        // 同じ座標を立てたとき、論理的には同じ集合になるはず
+        // When the same coordinates are set, they should be logically identical sets
         let coords = [(0, 0), (63, 0), (64, 0), (100, 100), (127, 127)];
 
         let mut m = Morton::default();
@@ -305,16 +307,16 @@ mod tests {
             r.set(x, y, true);
         }
 
-        // count_ones は一致
+        // count_ones matches
         assert_eq!(m.count_ones(), r.count_ones());
 
-        // 各座標で get の結果が一致
+        // get results match for each coordinate
         for &(x, y) in &coords {
             assert!(m.get(x, y));
             assert!(r.get(x, y));
         }
 
-        // iter_set_bits の集合が一致
+        // iter_set_bits sets match
         use std::collections::HashSet;
         let m_set: HashSet<_> = m.iter_set_bits().collect();
         let r_set: HashSet<_> = r.iter_set_bits().collect();

@@ -1,13 +1,13 @@
 use crate::layout::{BitLayout, RowMajorLayout};
 use std::marker::PhantomData;
 
-/// ビットマップデータ構造
-/// 型パラメータ W と H でボードサイズを型レベルで固定
-/// L でメモリレイアウトを指定 (デフォルトは行アライメント)
+/// Bitmap data structure
+/// Board size is fixed at the type level via W and H parameters.
+/// L specifies the memory layout (defaults to Row-Major).
 #[derive(Debug, PartialEq, Eq)]
 pub struct BitBoard<const W: usize, const H: usize, L: BitLayout<W, H> = RowMajorLayout> {
     pub(crate) data: Box<[u64]>,
-    /// 階層化マスク (Level 1): 各ビットは data[i] が 0 でないかを表す
+    /// Hierarchical mask (Level 1): each bit indicates whether data[i] is non-zero.
     pub(crate) block_mask: Box<[u64]>,
     _layout: PhantomData<L>,
 }
@@ -21,8 +21,8 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> Clone for BitBoard<W, H
         }
     }
 
-    /// 既存バッファをそのまま流用してコピーする。const ジェネリクスで
-    /// サイズが固定されているため、再アロケートは発生しない。
+    /// Copies by reusing the existing buffer. Since size is fixed by const generics,
+    /// no re-allocation occurs.
     fn clone_from(&mut self, source: &Self) {
         self.data.copy_from_slice(&source.data);
         self.block_mask.copy_from_slice(&source.block_mask);
@@ -32,40 +32,40 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> Clone for BitBoard<W, H
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
     // --- Constants & Static Utilities --
 
-    /// ボード幅（タイル数）
+    /// Board width (number of tiles)
     pub const WIDTH: usize = W;
 
-    /// ボード高さ（タイル数）
+    /// Board height (number of tiles)
     pub const HEIGHT: usize = H;
 
-    /// data 内部配列の総要素数
+    /// Total number of elements in the internal data array
     pub fn total_words() -> usize {
         L::total_words()
     }
 
-    /// block_mask 内部配列の要素数 (1ビットで1ワードをカバー)
+    /// Number of elements in the internal block_mask array (1 bit covers 1 word)
     pub fn block_words() -> usize {
         Self::total_words().div_ceil(64)
     }
 
-    /// ワールド座標からタイル座標への公式な変換 (床関数を使用)
+    /// Official conversion from world coordinates to tile coordinates (using floor)
     pub fn pos_to_tile(x: f32, y: f32) -> (i32, i32) {
         (x.floor() as i32, y.floor() as i32)
     }
 
-    /// タイル座標からフラットな空間インデックスへの変換
+    /// Converts tile coordinates to a flat spatial index
     pub fn tile_to_index(x: i32, y: i32) -> Option<usize> {
         L::coord_to_flat_index(x, y)
     }
 
-    /// フラットインデックスからタイル座標への変換
+    /// Converts a flat index to tile coordinates
     pub fn index_to_tile(idx: usize) -> (i32, i32) {
         L::flat_index_to_coord(idx)
     }
 
     // --- Creation & Life Cycle ---
 
-    /// 全ビット 0 のボードを生成
+    /// Creates a board with all bits set to 0
     pub fn new() -> Self {
         let total = Self::total_words();
         let block_count = Self::block_words();
@@ -76,13 +76,13 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// ボードの状態を整え、整合性を保証する（パディングのクリアとブロック再構築）
+    /// Finalizes the board state to ensure consistency (clears padding and rebuilds block mask)
     pub fn finalize(&mut self) {
         self.clear_padding();
         self.rebuild_block_mask();
     }
 
-    /// ビットマップ全体を 0 でクリア
+    /// Clears the entire bitmap to 0
     pub fn clear(&mut self) {
         self.data.fill(0);
         self.block_mask.fill(0);
@@ -90,20 +90,20 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     // --- Basic Access & Mutation ---
 
-    /// 指定座標のビットを取得
+    /// Gets the bit at the specified coordinates
     #[inline]
     pub fn get(&self, x: i32, y: i32) -> bool {
         Self::idx(x, y).is_some_and(|(word, bit)| (self.data[word] >> bit) & 1 != 0)
     }
 
-    /// フラットインデックス形式でビットを取得
+    /// Gets the bit in flat index format
     #[inline]
     pub fn get_by_index(&self, idx: usize) -> bool {
         let (x, y) = Self::index_to_tile(idx);
         self.get(x, y)
     }
 
-    /// 指定座標のビットを設定
+    /// Sets the bit at the specified coordinates
     #[inline]
     pub fn set(&mut self, x: i32, y: i32, value: bool) {
         if let Some((word, bit)) = Self::idx(x, y) {
@@ -121,19 +121,19 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
 
     // --- Internal State Management & Accessors ---
 
-    /// 内部データ (data) への読み取り専用アクセス
+    /// Read-only access to the internal data
     #[allow(dead_code)]
     pub(crate) fn data(&self) -> &[u64] {
         &self.data
     }
 
-    /// ブロック 層マスクへの読み取り専用アクセス
+    /// Read-only access to the block layer mask
     #[allow(dead_code)]
     pub(crate) fn block_mask(&self) -> &[u64] {
         &self.block_mask
     }
 
-    /// 内部的な初期化用
+    /// For internal initialization
     #[allow(dead_code)]
     pub(crate) fn new_with_mask(data: Box<[u64]>, block_mask: Box<[u64]>) -> Self {
         Self {
@@ -143,13 +143,13 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 指定インデックスのワードが非空であることを ブロック マスクに反映
+    /// Updates the block mask to indicate the word at the specified index is non-empty
     #[allow(dead_code)]
     pub(crate) fn mark_word_non_empty(&mut self, word_idx: usize) {
         self.block_mask[word_idx / 64] |= 1u64 << (word_idx % 64);
     }
 
-    /// 特定のワードに対してマスクを適用し、ブロック マスクを同期する
+    /// Applies a mask to a specific word and synchronizes the block mask
     #[allow(dead_code)]
     pub(crate) fn apply_word_mask(&mut self, word_idx: usize, mask: u64, value: bool) {
         if value {
@@ -161,7 +161,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 指定インデックスのワードの状態に基づいて ブロック マスクを再計算（低速パス）
+    /// Recalculates the block mask for a specific word index based on its state (slow path)
     #[allow(dead_code)]
     pub(crate) fn recalc_block_word(&mut self, word_idx: usize) {
         if self.data[word_idx] == 0 {
@@ -171,7 +171,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 内部データの全走査により ブロック マスクを再構築
+    /// Rebuilds the block mask by scanning all internal data
     pub fn rebuild_block_mask(&mut self) {
         self.block_mask.fill(0);
         for i in 0..Self::total_words() {
@@ -181,7 +181,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 行ごとの余剰ビット（パディング領域）を 0 クリア
+    /// Clears extra bits in the padding area of each row to 0
     pub(crate) fn clear_padding(&mut self) {
         if !L::has_padding() {
             return;
@@ -195,13 +195,13 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// タイル座標を内部インデックス (word_idx, bit_pos) に変換
+    /// Converts tile coordinates to internal indices (word_idx, bit_pos)
     #[inline]
     pub(crate) fn idx(x: i32, y: i32) -> Option<(usize, u32)> {
         L::coord_to_word_bit(x, y)
     }
 
-    /// 水平方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
+    /// Writes the result of a horizontal shift by a specified distance into another board (avoids allocation)
     pub fn shift_horizontal_into(&self, dist: i32, dst: &mut Self) {
         dst.clear();
         L::shift_horizontal(
@@ -214,7 +214,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         dst.clear_padding();
     }
 
-    /// 垂直方向に指定距離シフトした結果を別のボードに書き込む (アロケーション回避用)
+    /// Writes the result of a vertical shift by a specified distance into another board (avoids allocation)
     pub fn shift_vertical_into(&self, dist: i32, dst: &mut Self) {
         dst.clear();
         L::shift_vertical(
@@ -227,14 +227,14 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         dst.clear_padding();
     }
 
-    /// 水平方向に指定距離シフトした新しいボードを返す
+    /// Returns a new board shifted horizontally by the specified distance
     pub fn shifted_horizontal(&self, dist: i32) -> Self {
         let mut res = Self::new();
         self.shift_horizontal_into(dist, &mut res);
         res
     }
 
-    /// 垂直方向に指定距離シフトした新しいボードを返す
+    /// Returns a new board shifted vertically by the specified distance
     pub fn shifted_vertical(&self, dist: i32) -> Self {
         let mut res = Self::new();
         self.shift_vertical_into(dist, &mut res);
@@ -372,7 +372,7 @@ mod tests {
     #[test]
     fn test_block_mask_consistency() {
         let mut bb = TestBoard::default();
-        // 疎な状態でセット
+        // Set in a sparse state
         bb.set(10, 10, true);
         bb.set(70, 10, true); // Word 1
 
@@ -382,30 +382,30 @@ mod tests {
         assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) != 0);
         assert!(bb.block_mask[word_idx_70 / 64] & (1 << (word_idx_70 % 64)) != 0);
 
-        // クリア
+        // Clear
         bb.set(10, 10, false);
         assert!(bb.block_mask[word_idx_10 / 64] & (1 << (word_idx_10 % 64)) == 0);
 
-        // 完全にクリアされたか
+        // Is it completely cleared?
         bb.clear();
         assert!(bb.block_mask.iter().all(|&w| w == 0));
     }
 
     #[test]
     fn test_padding_safety() {
-        // 幅が64の倍数でないボード
+        // Board with a width that is not a multiple of 64
         type PaddingBoard = BitBoard<100, 2>;
         let mut bb = PaddingBoard::default();
 
-        // 有効範囲ギリギリ
+        // Edge of valid range
         bb.set(99, 0, true);
         assert!(bb.get(99, 0));
 
-        // パディング領域 (x=100..127) は無視されるか
+        // Are bits in padding area (x=100..127) ignored?
         bb.set(100, 0, true);
         assert!(!bb.get(100, 0));
 
-        // rebuild_block_mask がパディングを無視するか
+        // Does rebuild_block_mask ignore padding?
         bb.finalize();
         assert_eq!(bb.count_ones(), 1);
     }
@@ -415,14 +415,14 @@ mod tests {
         let mut bb = TestBoard::default();
         bb.set(100, 100, true);
 
-        // 盤面サイズ以上のシフト
+        // Shift greater than or equal to the board size
         let sh_h = bb.shifted_horizontal(256);
         assert_eq!(sh_h.count_ones(), 0);
 
         let sh_v = bb.shifted_vertical(-300);
         assert_eq!(sh_v.count_ones(), 0);
 
-        // ギリギリのシフト
+        // Shift at the edge of the board
         let sh_edge = bb.shifted_horizontal(155); // 100 + 155 = 255
         assert!(sh_edge.get(255, 100));
         assert_eq!(sh_edge.count_ones(), 1);

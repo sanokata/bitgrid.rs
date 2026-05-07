@@ -1,7 +1,7 @@
 use crate::{BitBoard, BitLayout};
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
-    /// 矩形範囲を一括で塗りつぶす (最適化版)
+    /// Fills a rectangular range in batch (optimized version).
     pub fn set_rect(&mut self, x: i32, y: i32, width: i32, height: i32, value: bool) {
         L::rect_op(
             &mut self.data,
@@ -14,18 +14,18 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         );
     }
 
-    /// 指定した座標を中心とした十字形を塗りつぶす
+    /// Fills a plus-shaped area centered at the specified coordinates.
     pub fn set_plus(&mut self, x: i32, y: i32, range: i32, value: bool) {
         if range < 0 {
             return;
         }
-        // 垂直
+        // Vertical
         self.set_rect(x, y - range, 1, range * 2 + 1, value);
-        // 水平
+        // Horizontal
         self.set_rect(x - range, y, range * 2 + 1, 1, value);
     }
 
-    /// 指定した座標を中心とした菱形（マンハッタン距離内）を塗りつぶす
+    /// Fills a diamond-shaped area (within Manhattan distance) centered at the specified coordinates.
     pub fn set_diamond(&mut self, x: i32, y: i32, range: i32, value: bool) {
         if range < 0 {
             return;
@@ -36,7 +36,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         }
     }
 
-    /// 指定した行の範囲に一括で値を設定 (内部ワード最適化)
+    /// Sets values for a range in a specified row in batch (internal word optimization).
     pub fn set_row(&mut self, y: i32, min_x: i32, max_x: i32, value: bool) {
         L::set_row(&mut self.data, &mut self.block_mask, y, min_x, max_x, value);
     }
@@ -66,7 +66,7 @@ mod tests {
         assert!(bb.get(100, 102));
         assert!(bb.get(98, 100));
         assert!(bb.get(102, 100));
-        assert!(!bb.get(99, 99)); // 斜めは含まない
+        assert!(!bb.get(99, 99)); // Diagonal not included
     }
 
     #[test]
@@ -78,7 +78,7 @@ mod tests {
         assert!(bb.get(100, 101));
         assert!(bb.get(99, 100));
         assert!(bb.get(101, 100));
-        assert!(!bb.get(99, 99)); // range 1 では角は含まない
+        assert!(!bb.get(99, 99)); // Corners not included for range 1
     }
 
     #[test]
@@ -95,16 +95,16 @@ mod tests {
     #[test]
     fn test_set_rect_out_of_bounds() {
         let mut bb = TestBoard::default();
-        // 完全に画面外 (マイナス)
+        // Completely off-screen (negative)
         bb.set_rect(-20, -20, 10, 10, true);
         assert!(bb.is_empty());
 
-        // 完全に画面外 (プラス)
+        // Completely off-screen (positive)
         bb.set_rect(300, 300, 10, 10, true);
         assert!(bb.is_empty());
 
-        // 部分的に画面外にはみ出す
-        bb.set_rect(-5, -5, 10, 10, true); // x: -5..5, y: -5..5 -> (0,0) から (4,4) が塗られるはず
+        // Partially off-screen
+        bb.set_rect(-5, -5, 10, 10, true); // x: -5..5, y: -5..5 -> (0,0) to (4,4) should be filled
         assert!(bb.get(0, 0));
         assert!(bb.get(4, 4));
         assert!(!bb.get(5, 5));

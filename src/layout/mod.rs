@@ -6,7 +6,7 @@ pub mod row_major;
 pub use morton::MortonLayout;
 pub use row_major::RowMajorLayout;
 
-/// BitBoard のメモリレイアウトを定義するトレイト
+/// Trait defining the memory layout for BitBoard
 pub trait BitLayout<const W: usize, const H: usize>:
     Default
     + Clone
@@ -19,28 +19,28 @@ pub trait BitLayout<const W: usize, const H: usize>:
     + Sync
     + 'static
 {
-    /// 指定されたサイズに必要なワード数 (u64) を計算
+    /// Calculates the number of words (u64) required for the specified size
     fn total_words() -> usize;
 
-    /// タイル座標 (x, y) からビット位置 (word_idx, bit_pos) への変換
+    /// Converts tile coordinates (x, y) to bit position (word_idx, bit_pos)
     fn coord_to_word_bit(x: i32, y: i32) -> Option<(usize, u32)>;
 
-    /// ビット位置 (word_idx, bit_pos) からタイル座標 (x, y) への変換
+    /// Converts bit position (word_idx, bit_pos) to tile coordinates (x, y)
     fn word_bit_to_coord(word: usize, bit: u32) -> (i32, i32);
 
-    /// フラットインデックスからタイル座標への変換 (外部API用)
+    /// Converts flat index to tile coordinates (for external API)
     fn flat_index_to_coord(idx: usize) -> (i32, i32);
 
-    /// タイル座標からフラットインデックスへの変換 (外部API用)
+    /// Converts tile coordinates to flat index (for external API)
     fn coord_to_flat_index(x: i32, y: i32) -> Option<usize>;
 
-    /// 行末パディングが必要か判定
+    /// Checks if end-of-row padding is required
     fn has_padding() -> bool;
 
-    /// 行末パディング用のマスクを取得
+    /// Gets the mask for end-of-row padding
     fn padding_mask() -> u64;
 
-    /// 水平シフト処理
+    /// Processes horizontal shift
     fn shift_horizontal(
         src: &[u64],
         block: &[u64],
@@ -49,7 +49,7 @@ pub trait BitLayout<const W: usize, const H: usize>:
         dist: i32,
     );
 
-    /// 垂直シフト処理
+    /// Processes vertical shift
     fn shift_vertical(
         src: &[u64],
         block: &[u64],
@@ -58,7 +58,7 @@ pub trait BitLayout<const W: usize, const H: usize>:
         dist: i32,
     );
 
-    /// 矩形範囲の一括操作
+    /// Performs batch operation on a rectangular range
     fn rect_op(
         data: &mut [u64],
         block: &mut [u64],
@@ -69,21 +69,21 @@ pub trait BitLayout<const W: usize, const H: usize>:
         value: bool,
     );
 
-    /// 行範囲の塗りつぶし
+    /// Fills a row range
     fn set_row(data: &mut [u64], block: &mut [u64], y: i32, min_x: i32, max_x: i32, value: bool);
 
-    /// 指定行にビットが立っているか判定
+    /// Checks if any bit is set in the specified row range
     fn has_any_in_row(data: &[u64], y: i32, min_x: i32, max_x: i32) -> bool;
 
-    /// 指定行の範囲内がすべてセットされているか判定
+    /// Checks if all bits in the specified row range are set
     fn is_all_in_row(data: &[u64], y: i32, min_x: i32, max_x: i32) -> bool;
 
-    /// ワールド座標 (f32) をタイル座標 (i32) に変換
+    /// Converts world coordinates (f32) to tile coordinates (i32)
     fn world_to_tile(pos: (f32, f32)) -> (i32, i32) {
         (pos.0.round() as i32, pos.1.round() as i32)
     }
 
-    /// タイル座標 (i32) をワールド座標 (f32) に変換（中心座標）
+    /// Converts tile coordinates (i32) to world coordinates (f32) (center coordinates)
     fn tile_to_world(x: i32, y: i32) -> (f32, f32) {
         (x as f32, y as f32)
     }

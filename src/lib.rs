@@ -8,7 +8,7 @@ mod morphology;
 mod ops;
 mod query;
 
-// 公開する主要な型とトレイト
+// Major types and traits for public API
 pub use board::BitBoard;
 pub use iter::BitBoardIter;
 pub use layout::{BitLayout, MortonLayout, RowMajorLayout};

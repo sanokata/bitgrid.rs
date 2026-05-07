@@ -1,8 +1,8 @@
 use crate::{BitBoard, BitLayout};
 
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
-    /// 指定サイズのユニットが通行可能な領域（左上座標の集合）を一括計算
-    /// 垂直・水平方向に (size - 1) 回のビットシフト AND を指数的に行い、全タイルの空きを確認
+    /// Efficiently calculates areas (set of top-left coordinates) where a unit of a given size can fit.
+    /// Performs (size - 1) bitwise AND operations with vertical and horizontal shifts exponentially.
     pub fn fit_rect_anchor(&self, width: u32, height: u32) -> Self {
         let mut res = self.clone();
         let mut scratch = Self::new();
@@ -10,16 +10,11 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         res
     }
 
-    /// `fit_rect_anchor` の in-place / アロケーションフリー版。
-    /// `self` に縮小結果を上書きし、`scratch` をシフト先のバッファとして再利用する。
-    /// O(log(max(width, height))) 回呼ばれる shifted_* に伴う allocation を排除する。
-    pub fn fit_rect_anchor_with_buffer(
-        &mut self,
-        width: u32,
-        height: u32,
-        scratch: &mut Self,
-    ) {
-        // 垂直方向の縮小
+    /// In-place / allocation-free version of `fit_rect_anchor`.
+    /// Overwrites `self` with the result and reuses `scratch` as a shift buffer.
+    /// Eliminates allocations from `shifted_*` called O(log(max(width, height))) times.
+    pub fn fit_rect_anchor_with_buffer(&mut self, width: u32, height: u32, scratch: &mut Self) {
+        // Vertical reduction
         let mut current_h = 1;
         while current_h < height {
             let d = (height - current_h).min(current_h);
@@ -28,7 +23,7 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
             current_h += d;
         }
 
-        // 水平方向の縮小
+        // Horizontal reduction
         let mut current_w = 1;
         while current_w < width {
             let d = (width - current_w).min(current_w);
@@ -40,20 +35,20 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.finalize();
     }
 
-    /// BFS ウェーブフロントを 1 ステップ展開
-    /// 現在のフロンティアを 4 方向（上下左右）に広げ、マスク処理と既訪問除外を実行
+    /// Expands the BFS wavefront by one step.
+    /// Expands the current frontier in 4 directions (up, down, left, right), applying mask and excluding visited tiles.
     pub fn flood_expand(&self, passable: &Self, visited: &mut Self) -> Self {
         let mut next = Self::default();
         self.flood_expand_into(passable, visited, &mut next);
         next
     }
 
-    /// `flood_expand` のアロケーション抑制版。
+    /// Allocation-reduced version of `flood_expand`.
     pub fn flood_expand_into(&self, passable: &Self, visited: &mut Self, out: &mut Self) {
         let mut temp = Self::new();
         out.clear();
 
-        // 4方向展開 (上下左右)
+        // Expand in 4 directions (up, down, left, right)
         self.shift_vertical_into(-1, &mut temp);
         *out |= &temp;
         self.shift_vertical_into(1, &mut temp);
@@ -63,9 +58,9 @@ impl<const W: usize, const H: usize, L: BitLayout<W, H>> BitBoard<W, H, L> {
         self.shift_horizontal_into(-1, &mut temp);
         *out |= &temp;
 
-        // 通行可能マスク適用 + 既訪問除外を実施しつつ、同じ走査内で block_mask を構築。
-        // visited を反転させたものをマスクとして使用するが、!visited は密になり得るため
-        // block_mask によるスキップは効かない。代わりに rebuild_block_mask の二重走査を排除する。
+        // Apply passable mask and exclude visited tiles, while building block_mask in the same pass.
+        // !visited is used as a mask, but since it can be dense, block_mask skip is ineffective.
+        // Instead, we eliminate the double pass of rebuild_block_mask.
         out.block_mask.fill(0);
         for i in 0..Self::total_words() {
             out.data[i] &= passable.data[i] & !visited.data[i];
@@ -96,13 +91,13 @@ mod tests {
         frontier.set(2, 2, true);
         let mut visited = frontier.clone();
 
-        // 1 ステップ展開: 4方向の隣接タイル
+        // 1-step expansion: 4 adjacent tiles
         let next = frontier.flood_expand(&passable, &mut visited);
         assert!(next.get(1, 2)); // West
         assert!(next.get(3, 2)); // East
         assert!(next.get(2, 1)); // North
         assert!(next.get(2, 3)); // South
-        assert!(!next.get(2, 2)); // 既訪問
+        assert!(!next.get(2, 2)); // Already visited
         assert_eq!(next.count_ones(), 4);
     }
 
@@ -110,7 +105,7 @@ mod tests {
     fn test_flood_expand_respects_walls() {
         type Bb = BitBoard<8, 8>;
         let mut passable = Bb::default();
-        // L字型の通路
+        // L-shaped passage
         passable.set(0, 0, true);
         passable.set(1, 0, true);
         passable.set(1, 1, true);
@@ -120,14 +115,14 @@ mod tests {
         let mut visited = frontier.clone();
 
         let next = frontier.flood_expand(&passable, &mut visited);
-        assert!(next.get(1, 0)); // 通路方向に展開
-        assert!(!next.get(0, 1)); // 壁なので展開されない
+        assert!(next.get(1, 0)); // Expanded towards passage
+        assert!(!next.get(0, 1)); // Wall, so not expanded
         assert_eq!(next.count_ones(), 1);
     }
 
     #[test]
     fn test_flood_expand_no_padding_leak() {
-        // W が 64 の倍数でないボードで flood_expand がパディングビットを漏らさないことを確認
+        // Ensure flood_expand does not leak padding bits on boards where W is not a multiple of 64
         type Bb = BitBoard<100, 10>;
         let mut passable = Bb::default();
         for y in 0..10 {
@@ -137,7 +132,7 @@ mod tests {
         }
 
         let mut frontier = Bb::default();
-        frontier.set(99, 5, true); // 右端
+        frontier.set(99, 5, true); // Right edge
         let mut visited = frontier.clone();
 
         let next = frontier.flood_expand(&passable, &mut visited);
@@ -158,11 +153,11 @@ mod tests {
 
         let result = passable.fit_rect_anchor(2, 2);
 
-        // 2×2 ユニットの左上が置ける位置
+        // Positions where top-left of a 2x2 unit can be placed
         assert!(result.get(0, 0));
         assert!(result.get(1, 1));
-        assert!(result.get(2, 2)); // 右下が (3,3) で通行可能範囲内
-        assert!(!result.get(3, 3)); // 右下が (4,4) で通行不可
+        assert!(result.get(2, 2)); // Bottom-right is (3,3), within passable range
+        assert!(!result.get(3, 3)); // Bottom-right is (4,4), not passable
         assert!(!result.get(4, 0));
         assert!(!result.get(0, 4));
     }
@@ -175,14 +170,14 @@ mod tests {
             for x in 0..8 {
                 passable.set(x, y, true);
             }
-        } // 全て通行可能
+        } // All tiles passable
 
         let mut frontier = Bb::default();
-        frontier.set(0, 0, true); // 左上隅
+        frontier.set(0, 0, true); // Top-left corner
         let mut visited = frontier.clone();
 
         let next = frontier.flood_expand(&passable, &mut visited);
-        // 上(-y)と左(-x)には展開されず、右と下のみ展開されること
+        // Not expanded up (-y) or left (-x); only expanded right and down
         assert_eq!(next.count_ones(), 2);
         assert!(next.get(1, 0));
         assert!(next.get(0, 1));
@@ -198,7 +193,7 @@ mod tests {
             }
         }
 
-        // ボードサイズより大きい要求は全て false になるべき
+        // Requirements larger than the board size should return an empty mask
         let result = passable.fit_rect_anchor(10, 10);
         assert!(result.is_empty());
     }
