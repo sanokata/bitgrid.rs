@@ -1,9 +1,9 @@
-# Lexaos BitBoard
+# BitGrid
 
-A high-performance, flexible bitboard and bitgrid library for Rust, designed for spatial queries, pathfinding, and visibility calculations.
+A high-performance, flexible bitboard library for Rust, designed for spatial queries, pathfinding, and visibility calculations.
 
-[![Crates.io](https://img.shields.io/crates/v/lexaos_bitboard.svg)](https://crates.io/crates/lexaos_bitboard)
-[![Docs.rs](https://docs.rs/lexaos_bitboard/badge.svg)](https://docs.rs/lexaos_bitboard)
+[![Crates.io](https://img.shields.io/crates/v/bitgrid.svg)](https://crates.io/crates/bitgrid)
+[![Docs.rs](https://docs.rs/bitgrid/badge.svg)](https://docs.rs/bitgrid)
 
 ## Features
 
@@ -24,13 +24,13 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-lexaos_bitboard = "0.1.0"
+bitgrid = "0.1.0"
 ```
 
 ## Quick Start
 
 ```rust
-use lexaos_bitboard::{BitBoard, RowMajorLayout};
+use bitgrid::{BitBoard, RowMajorLayout};
 
 fn main() {
     // Create a 256x256 bitboard with the default Row-Major layout
@@ -77,7 +77,7 @@ let expanded = obstacles.dilate(2);
 ### Coordinate Conversion
 
 ```rust
-use lexaos_bitboard::RowMajorLayout as L;
+use bitgrid::RowMajorLayout as L;
 
 // Convert continuous world points to discrete grid coordinates
 let (x, y) = L::point_to_coord((10.5, 20.9));
@@ -90,7 +90,7 @@ assert_eq!((px, py), (10.0, 20.0));
 
 ## Performance
 
-Lexaos BitBoard is built for speed. It uses a 2-level hierarchical mask to skip empty 64-bit words, making operations on sparse boards significantly faster than simple bit arrays. 
+BitGrid is built for speed. It uses a 2-level hierarchical mask to skip empty 64-bit words, making operations on sparse boards significantly faster than simple bit arrays. 
 
 Bitwise operations (AND, OR, XOR, NOT) and shifts are highly optimized for both Row-Major and Morton layouts, leveraging modern CPU bit-manipulation instructions.
 
@@ -102,3 +102,6 @@ Licensed under either of:
 - MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
 
 at your option.
+
+---
+**Note**: Generative AI was used to assist in the development of this project. However, all code has been reviewed, tested, and the author takes full responsibility for the final quality and functionality

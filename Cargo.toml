@@ -1,5 +1,5 @@
 [package]
-name = "lexaos_bitboard"
+name = "bitgrid"
 version = "0.1.0"
 edition = "2024"
 description = "High-performance bitboard and bitgrid library for 2D spatial queries and visibility"

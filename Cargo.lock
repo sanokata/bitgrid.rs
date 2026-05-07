@@ -3,7 +3,7 @@
 version = 4
 
 [[package]]
-name = "lexaos_bitboard"
+name = "bitgrid"
 version = "0.1.0"
 dependencies = [
  "serde",
