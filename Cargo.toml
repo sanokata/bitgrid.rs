@@ -2,6 +2,12 @@
 name = "lexaos_bitboard"
 version = "0.1.0"
 edition = "2024"
+description = "High-performance bitboard and bitgrid library for 2D spatial queries and visibility"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/sanokata/bitgrid-rs"
+readme = "README.md"
+keywords = ["bitboard", "grid", "spatial", "visibility", "pathfinding"]
+categories = ["data-structures", "game-engines", "algorithms"]
 
 # No external dependencies (pure Rust)
 [dependencies]
