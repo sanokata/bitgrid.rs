@@ -1,26 +1,23 @@
-use crate::{BitBoard, BitLayout};
+use crate::{BitBoard, layout::BitLayout};
 use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign, BitXor, BitXorAssign, Not};
 
-// ─────────────── マクロ定義 ───────────────────────────────
+// ─────────────── 疎なビット演算用マクロ ───────────────────────────────
 
-/// 疎なビットボード向けの二項演算を実装するマクロ
 macro_rules! impl_sparse_binop {
-    ($Trait:ident, $method:ident, $block_op:tt, $data_op:tt) => {
-        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait for &BitBoard<W, H, L> {
+    ($trait:ident, $method:ident, $op:tt, $assign_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $trait for &BitBoard<W, H, L> {
             type Output = BitBoard<W, H, L>;
             fn $method(self, rhs: Self) -> Self::Output {
                 let mut result = BitBoard::new();
-                for i in 0..BitBoard::<W, H, L>::block_words() {
-                    let mut bits = self.block_mask[i] $block_op rhs.block_mask[i];
-                    while bits != 0 {
-                        let bit = bits.trailing_zeros();
-                        let idx = i * 64 + bit as usize;
-                        let val = self.data[idx] $data_op rhs.data[idx];
-                        if val != 0 {
-                            result.data[idx] = val;
-                            result.block_mask[i] |= 1u64 << bit;
+                for i in 0..self.block_mask.len() {
+                    let m = self.block_mask[i] $op rhs.block_mask[i];
+                    if m == 0 { continue; }
+                    result.block_mask[i] = m;
+                    for j in 0..64 {
+                        if (m & (1u64 << j)) != 0 {
+                            let idx = i * 64 + j;
+                            result.data[idx] = self.data[idx] $op rhs.data[idx];
                         }
-                        bits &= bits - 1;
                     }
                 }
                 result
@@ -29,24 +26,28 @@ macro_rules! impl_sparse_binop {
     };
 }
 
-/// 疎なビットボード向けの代入演算を実装するマクロ
 macro_rules! impl_sparse_assign_op {
-    ($Trait:ident, $method:ident, $block_union:tt, $data_op:tt) => {
-        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $Trait<&BitBoard<W, H, L>> for BitBoard<W, H, L> {
+    ($trait:ident, $method:ident, $mask_op:tt, $assign_op:tt) => {
+        impl<const W: usize, const H: usize, L: BitLayout<W, H>> $trait<&BitBoard<W, H, L>> for BitBoard<W, H, L> {
             fn $method(&mut self, rhs: &BitBoard<W, H, L>) {
-                for i in 0..BitBoard::<W, H, L>::block_words() {
-                    let mut bits = self.block_mask[i] $block_union rhs.block_mask[i];
-                    self.block_mask[i] = 0;
-                    while bits != 0 {
-                        let bit = bits.trailing_zeros();
-                        let idx = i * 64 + bit as usize;
-                        self.data[idx] $data_op rhs.data[idx];
-                        if self.data[idx] != 0 {
-                            self.block_mask[i] |= 1u64 << bit;
-                        }
-                        bits &= bits - 1;
+                // mask は入力の両方の OR に基づいて走査 (OR のビットが立っている場所だけ演算が必要)
+                let combined_mask = self.block_mask.len();
+                for i in 0..combined_mask {
+                    let m = self.block_mask[i] $mask_op rhs.block_mask[i];
+                    if m == 0 {
+                        // 両方空なら self は 0 になるはず
+                        // (BitAndAssign の場合は self の既存ビットも消える)
+                        // ただし AND なら self.mask & rhs.mask で 0 なら data も 0
+                        // OR/XOR なら self.mask | rhs.mask で 0 なら元々 0
+                        continue;
+                    }
+                    for j in 0..64 {
+                        let idx = i * 64 + j;
+                        if idx >= self.data.len() { break; }
+                        self.data[idx] $assign_op rhs.data[idx];
                     }
                 }
+                self.rebuild_block_mask();
             }
         }
     };
@@ -54,21 +55,20 @@ macro_rules! impl_sparse_assign_op {
 
 // ─────────────── トレイト実装 ───────────────────────────────
 
-// AND: 結果が疎になりやすいため ブロックマスク でスキップ
+// AND
 impl_sparse_binop!(BitAnd, bitand, &, &);
 impl_sparse_assign_op!(BitAndAssign, bitand_assign, |, &=);
 
-// XOR: 中間的な性質だが、共通項をスキップできるためマクロを使用
+// XOR
 impl_sparse_binop!(BitXor, bitxor, |, ^);
 impl_sparse_assign_op!(BitXorAssign, bitxor_assign, |, ^=);
 
-// OR: 結果が密になりやすいが、入力が疎な場合にはブロックスキップが有効
+// OR
 impl_sparse_binop!(BitOr, bitor, |, |);
 impl_sparse_assign_op!(BitOrAssign, bitor_assign, |, |=);
 
-// NOT: 全ビット反転。
-// 反転は密になりやすいので block_mask スキップは効かないが、反転と
-// block_mask 構築を 1 パスで行うことで rebuild_block_mask の追加走査を排除する。
+// NOT
+// 反転と block_mask 構築を 1 パスで行うことで rebuild_block_mask の追加走査を排除する。
 impl<const W: usize, const H: usize, L: BitLayout<W, H>> Not for &BitBoard<W, H, L> {
     type Output = BitBoard<W, H, L>;
     fn not(self) -> Self::Output {
@@ -112,8 +112,8 @@ fn not_into(src: &[u64], dst_data: &mut [u64], dst_block_mask: &mut [u64]) {
     }
 }
 
-/// `clear_padding` 後に最終ワードが 0 になった場合のみ block_mask を補正する。
-/// レイアウトにパディングがなければ no-op。
+/// `clear_padding` 後に最終ワードが 0 になった場合、 block_mask を補正する。
+/// レイアウトにパディングがない場合 -> no-op。
 #[inline]
 fn fix_padding_block_mask<const W: usize, const H: usize, L: BitLayout<W, H>>(
     data: &[u64],
